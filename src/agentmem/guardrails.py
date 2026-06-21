@@ -143,21 +143,38 @@ _COMMAND_TOOLS = {
 }
 
 # Patterns that almost never have a safe intent in an automated run. Kept narrow to
-# avoid over-blocking; each comes with a human-readable reason.
-_DESTRUCTIVE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\brm\s+(-[a-zA-Z]*\s+)*-?[a-zA-Z]*[rf][a-zA-Z]*\s+(-[a-zA-Z]+\s+)*(/|~|\$HOME)(\s|$)"),
+# avoid over-blocking; each carries a stable KEY (so the dashboard can disable it
+# individually via Config.guard_disabled_patterns) and a human-readable reason.
+_DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
+    ("rm_root_home",
+     re.compile(r"\brm\s+(-[a-zA-Z]*\s+)*-?[a-zA-Z]*[rf][a-zA-Z]*\s+(-[a-zA-Z]+\s+)*(/|~|\$HOME)(\s|$)"),
      "recursive/forced delete of a root or home path"),
-    (re.compile(r"\bmkfs(\.[a-z0-9]+)?\b"), "filesystem format (mkfs)"),
-    (re.compile(r"\bdd\b[^\n]*\bof=/dev/"), "raw write to a block device (dd of=/dev/...)"),
-    (re.compile(r">\s*/dev/(sd|nvme|disk|hd)"), "redirect over a raw disk device"),
-    (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:"), "fork bomb"),
-    (re.compile(r"\bgit\s+push\b[^\n]*--force[^\n]*\b(origin\s+)?(main|master)\b"),
-     "force-push to main/master"),
-    (re.compile(r"\bgit\s+push\b[^\n]*\b(main|master)\b[^\n]*--force"),
-     "force-push to main/master"),
-    (re.compile(r"\bchmod\s+-R\s+0*7{3,4}\s+/"), "recursive chmod 777 on a root path"),
-    (re.compile(r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b"), "host shutdown/reboot"),
+    ("mkfs", re.compile(r"\bmkfs(\.[a-z0-9]+)?\b"), "filesystem format (mkfs)"),
+    ("dd_to_device", re.compile(r"\bdd\b[^\n]*\bof=/dev/"), "raw write to a block device (dd of=/dev/...)"),
+    ("redirect_to_disk", re.compile(r">\s*/dev/(sd|nvme|disk|hd)"), "redirect over a raw disk device"),
+    ("fork_bomb", re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:"), "fork bomb"),
+    ("force_push_main",
+     re.compile(r"\bgit\s+push\b[^\n]*--force[^\n]*\b(origin\s+)?(main|master)\b"),
+     "force-push to main/master (--force before branch)"),
+    ("force_push_main_alt",
+     re.compile(r"\bgit\s+push\b[^\n]*\b(main|master)\b[^\n]*--force"),
+     "force-push to main/master (--force after branch)"),
+    ("chmod_777_root", re.compile(r"\bchmod\s+-R\s+0*7{3,4}\s+/"), "recursive chmod 777 on a root path"),
+    ("host_shutdown", re.compile(r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b"), "host shutdown/reboot"),
 ]
+
+
+def destructive_pattern_catalog() -> list[dict]:
+    """The full destructive blocklist as plain dicts — consumed by the dashboard."""
+    return [
+        {"key": key, "reason": reason, "regex": pattern.pattern}
+        for key, pattern, reason in _DESTRUCTIVE_PATTERNS
+    ]
+
+
+def policed_tools() -> dict:
+    """Which tools each guard inspects — read-only context for the dashboard."""
+    return {"url": sorted(_URL_TOOLS), "command": sorted(_COMMAND_TOOLS)}
 
 
 class DestructiveCommandGuardrail(Guardrail):
@@ -165,10 +182,12 @@ class DestructiveCommandGuardrail(Guardrail):
         self,
         *,
         tools: dict[str, str] | None = None,
-        patterns: list[tuple[re.Pattern[str], str]] | None = None,
+        patterns: list[tuple[str, re.Pattern[str], str]] | None = None,
+        disabled: list[str] | set[str] | None = None,
     ) -> None:
         self._tools = dict(tools) if tools is not None else dict(_COMMAND_TOOLS)
         self._patterns = patterns if patterns is not None else list(_DESTRUCTIVE_PATTERNS)
+        self._disabled = {k.lower() for k in (disabled or [])}
 
     async def check(self, tool_name: str, args: dict) -> GuardrailDecision:
         arg = self._tools.get(tool_name)
@@ -177,7 +196,9 @@ class DestructiveCommandGuardrail(Guardrail):
         command = str(args.get(arg, "")).strip()
         if not command:
             return GuardrailDecision(allow=True)
-        for pattern, reason in self._patterns:
+        for key, pattern, reason in self._patterns:
+            if key in self._disabled:
+                continue
             if pattern.search(command):
                 _log.info("destructive guardrail vetoed command: %s", command)
                 return GuardrailDecision(
@@ -205,17 +226,38 @@ class GuardrailChain:
         return GuardrailDecision(allow=True)
 
 
+def _custom_patterns(cfg: Config) -> list[tuple[str, re.Pattern[str], str]]:
+    """Compile the ENABLED user-defined rules (from the custom-rules JSON file)."""
+    from .config import custom_rules_path
+    from .rules_store import CustomRuleStore
+
+    out: list[tuple[str, re.Pattern[str], str]] = []
+    for rule in CustomRuleStore(custom_rules_path(cfg)).load():
+        if not rule.enabled:
+            continue
+        try:
+            out.append((rule.key, re.compile(rule.regex), rule.reason))
+        except re.error:
+            continue  # validated on write, but never let a bad rule wedge the guard
+    return out
+
+
 def build_chain(cfg: Config | None = None) -> GuardrailChain:
     cfg = cfg or Config.from_env()
-    return GuardrailChain([
-        UrlGuardrail(
+    guards: list[Guardrail] = []
+    if cfg.guard_url_enabled:
+        guards.append(UrlGuardrail(
             allow_domains=cfg.guard_allow_domains,
             check_reachable=cfg.guard_check_reachable,
             probe_timeout=cfg.probe_timeout,
             probe_user_agent=cfg.probe_user_agent,
-        ),
-        DestructiveCommandGuardrail(),
-    ])
+        ))
+    if cfg.guard_destructive_enabled:
+        patterns = list(_DESTRUCTIVE_PATTERNS) + _custom_patterns(cfg)
+        guards.append(DestructiveCommandGuardrail(
+            patterns=patterns, disabled=cfg.guard_disabled_patterns,
+        ))
+    return GuardrailChain(guards)
 
 
 async def check(tool_name: str, args: dict, *, cfg: Config | None = None) -> GuardrailDecision:

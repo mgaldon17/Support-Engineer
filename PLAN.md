@@ -8,7 +8,7 @@ rol (triaje, objetivo, juez, actor, verificador). Esa reimplementación existe p
 es un LLM local pequeño (qwen 7B/14B/VL) sin orquestador propio — y de ahí vienen los problemas
 observados (alucinación de URLs, bucles, plumbing de visión para screenshots).
 
-El objetivo de **este repo (`AgentScalator-Claude`)** es invertir eso: **usar Claude Code como
+El objetivo de **este repo (`Support Engineer`)** es invertir eso: **usar Claude Code como
 runtime** y expresar toda la orquestación en archivos `.md`/config (CLAUDE.md, subagentes, skills,
 slash-commands, hooks, `.mcp.json`). Así, el bucle, el razonamiento y la visión los aporta Claude
 nativamente, y el **único código real** se concentra donde Claude Code no llega:
@@ -119,7 +119,7 @@ que envuelve `store.py` y expone tools (funcionan en Claude Code **y** Copilot):
 ## Estructura del repo
 
 ```
-AgentScalator-Claude/
+support-engineer/
 ├── CLAUDE.md
 ├── PLAN.md                      # este documento
 ├── .mcp.json
