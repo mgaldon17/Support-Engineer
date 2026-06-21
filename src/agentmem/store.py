@@ -20,8 +20,10 @@ from .lesson import Lesson, LessonOrigin
 
 _log = logging.getLogger("agentmem.store")
 
-# Single namespace for all lessons (mem0 requires an identity in its filters).
+# Default namespace / list cap when the store is built without a Config (e.g. tests).
+# Production values come from Config (mem_user / lesson_list_limit) via build_store.
 _USER = "agentcore"
+_LIST_LIMIT = 1000
 
 
 def _to_lesson(item: dict) -> Lesson:
@@ -52,13 +54,15 @@ def _metadata(lesson: Lesson) -> dict:
 
 
 class Mem0LessonStore:
-    def __init__(self, memory) -> None:
-        self._mem = memory   # a mem0.Memory instance
+    def __init__(self, memory, *, user: str = _USER, list_limit: int = _LIST_LIMIT) -> None:
+        self._mem = memory          # a mem0.Memory instance
+        self._user = user           # namespace for mem0's identity filters
+        self._list_limit = list_limit
 
     async def add(self, lesson: Lesson) -> None:
         res = await asyncio.to_thread(
             self._mem.add, lesson.content,
-            user_id=_USER, metadata=_metadata(lesson), infer=False,
+            user_id=self._user, metadata=_metadata(lesson), infer=False,
         )
         items = (res or {}).get("results") or []
         if items:  # adopt mem0's id so get/update/delete address the same record
@@ -81,13 +85,13 @@ class Mem0LessonStore:
 
     async def search(self, query: str, *, limit: int = 8) -> list[Lesson]:
         res = await asyncio.to_thread(
-            self._mem.search, query, top_k=limit, filters={"user_id": _USER}
+            self._mem.search, query, top_k=limit, filters={"user_id": self._user}
         )
         return [_to_lesson(it) for it in (res or {}).get("results", [])]
 
     async def list(self, *, pending_review: bool | None = None) -> list[Lesson]:
         res = await asyncio.to_thread(
-            self._mem.get_all, filters={"user_id": _USER}, top_k=1000
+            self._mem.get_all, filters={"user_id": self._user}, top_k=self._list_limit
         )
         lessons = [_to_lesson(it) for it in (res or {}).get("results", [])]
         if pending_review is not None:
@@ -116,6 +120,28 @@ class Mem0LessonStore:
         return lesson
 
 
+def _embedder_config(cfg: Config) -> dict:
+    """mem0 embedder config for the configured provider.
+
+    Local (no server): ``huggingface`` (sentence-transformers) / ``fastembed`` only
+    need a model name. Remote/OpenAI-compatible (``openai``/``lmstudio``) take a base
+    URL + key; ``ollama`` takes its own base URL. The model name is always passed."""
+    provider = cfg.embedder_provider.lower()
+    embedder_cfg: dict = {"model": cfg.embedder_model}
+    if provider in ("huggingface", "fastembed"):
+        return embedder_cfg
+    if provider == "ollama":
+        if cfg.embedder_base_url:
+            embedder_cfg["ollama_base_url"] = cfg.embedder_base_url
+        return embedder_cfg
+    # openai / lmstudio / azure_openai and other OpenAI-compatible providers
+    if cfg.embedder_base_url:
+        embedder_cfg["openai_base_url"] = cfg.embedder_base_url
+    if cfg.embedder_api_key:
+        embedder_cfg["api_key"] = cfg.embedder_api_key
+    return embedder_cfg
+
+
 def build_store(cfg: Config) -> Mem0LessonStore:
     """Construct a mem0-backed store: Qdrant (Docker, persistent) + the configured
     embedder. mem0 also requires an LLM object even when we never infer; we point it
@@ -127,11 +153,7 @@ def build_store(cfg: Config) -> Mem0LessonStore:
             "agentmem needs the 'mem0ai' package: pip install -e '.'"
         ) from exc
 
-    embedder_cfg: dict = {"model": cfg.embedder_model}
-    if cfg.embedder_base_url:
-        embedder_cfg["openai_base_url"] = cfg.embedder_base_url
-    if cfg.embedder_api_key:
-        embedder_cfg["api_key"] = cfg.embedder_api_key
+    embedder_cfg = _embedder_config(cfg)
 
     config = {
         "vector_store": {
@@ -140,6 +162,9 @@ def build_store(cfg: Config) -> Mem0LessonStore:
                 "host": cfg.qdrant_host,
                 "port": cfg.qdrant_port,
                 "collection_name": cfg.collection,
+                # mem0's vector store does NOT derive this from the embedder; it must
+                # match the model's output dim or Qdrant rejects the vectors.
+                "embedding_model_dims": cfg.embedder_dims,
             },
         },
         "embedder": {"provider": cfg.embedder_provider, "config": embedder_cfg},
@@ -157,4 +182,8 @@ def build_store(cfg: Config) -> Mem0LessonStore:
         "building mem0 store (host=%s:%s, collection=%s)",
         cfg.qdrant_host, cfg.qdrant_port, cfg.collection,
     )
-    return Mem0LessonStore(Memory.from_config(config))
+    return Mem0LessonStore(
+        Memory.from_config(config),
+        user=cfg.mem_user,
+        list_limit=cfg.lesson_list_limit,
+    )

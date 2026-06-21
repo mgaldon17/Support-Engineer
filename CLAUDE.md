@@ -104,5 +104,11 @@ a URL).
 - `docker compose up -d` starts Qdrant (the lesson store) on `localhost:6333`.
 - `pip install -e .` installs `agentmem` (mem0 + qdrant-client + mcp + httpx). The
   `memory` MCP server runs as `python -m agentmem.mcp_server` (wired in `.mcp.json`).
-- Memory/embedder/guardrail settings come from env vars (see `src/agentmem/config.py`);
-  defaults target a local Qdrant + LM Studio embedder.
+- Memory/embedder/guardrail settings live in `config.env` (KEY=VALUE) at the repo root,
+  loaded by `src/agentmem/config.py`; a real environment variable overrides the file,
+  and the file overrides the built-in defaults (point elsewhere with `AGENTMEM_CONFIG`).
+  The embedder runs **locally in-process** (sentence-transformers, multilingual MiniLM)
+  — no LM Studio, no API key, fully offline after the model downloads once. To use a
+  remote OpenAI-compatible embedder instead, set `EMBEDDER_PROVIDER=openai` +
+  `EMBEDDER_MODEL/BASE_URL/API_KEY/DIMS`. Changing the embedder requires a fresh Qdrant
+  collection (the vector dimension changes).

@@ -57,10 +57,12 @@ def _view(lesson: Lesson) -> dict:
 
 
 @mcp.tool()
-async def lesson_search(query: str, limit: int = 8) -> list[dict]:
+async def lesson_search(query: str, limit: int | None = None) -> list[dict]:
     """Semantically recall the lessons most relevant to ``query`` (by meaning, any
-    language). Returns the top matches as {id, title, content, reuse, failure_count}."""
-    lessons = await _store().search(query, limit=limit)
+    language). ``limit`` defaults to Config.lesson_search_limit when omitted.
+    Returns the top matches as {id, title, content, reuse, failure_count}."""
+    lim = limit if limit is not None else _cfg().lesson_search_limit
+    lessons = await _store().search(query, limit=lim)
     return [_view(l) for l in lessons]
 
 

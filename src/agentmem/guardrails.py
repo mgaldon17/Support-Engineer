@@ -16,6 +16,7 @@ Two guards, both invoked from the ``PreToolUse`` hook (``hooks/guardrail_check.p
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -50,14 +51,21 @@ Probe = Callable[[str], Awaitable[bool]]   # url -> reachable?
 # ``mcp__<server>__<tool>``; the sibling repo used the flat ``pw_browser_navigate``.
 _URL_TOOLS = {"mcp__pw__browser_navigate", "pw_browser_navigate"}
 
+# Probe defaults when a UrlGuardrail is built without a Config (e.g. tests). Production
+# values come from Config (probe_timeout / probe_user_agent) via build_chain.
+_PROBE_TIMEOUT = 5.0
+_PROBE_USER_AGENT = "Mozilla/5.0 (agentmem url-guardrail)"
 
-async def _http_probe(url: str) -> bool:
+
+async def _http_probe(
+    url: str, *, timeout: float = _PROBE_TIMEOUT, user_agent: str = _PROBE_USER_AGENT
+) -> bool:
     """Best-effort reachability: True unless DNS clearly fails or the page is 404/410."""
     import httpx
 
-    headers = {"User-Agent": "Mozilla/5.0 (agentmem url-guardrail)"}
+    headers = {"User-Agent": user_agent}
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=5.0) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
             try:
                 resp = await client.head(url, headers=headers)
                 if resp.status_code == 405:  # HEAD not allowed -> retry GET
@@ -80,12 +88,16 @@ class UrlGuardrail(Guardrail):
         url_arg: str = "url",
         check_reachable: bool = False,
         probe: Probe | None = None,
+        probe_timeout: float = _PROBE_TIMEOUT,
+        probe_user_agent: str = _PROBE_USER_AGENT,
     ) -> None:
         self._tools = set(tools) if tools is not None else set(_URL_TOOLS)
         self._allow = [d.lower() for d in (allow_domains or [])]
         self._arg = url_arg
         self._check_reachable = check_reachable
-        self._probe = probe or _http_probe
+        self._probe = probe or functools.partial(
+            _http_probe, timeout=probe_timeout, user_agent=probe_user_agent
+        )
 
     async def check(self, tool_name: str, args: dict) -> GuardrailDecision:
         if self._tools and tool_name not in self._tools:
@@ -199,6 +211,8 @@ def build_chain(cfg: Config | None = None) -> GuardrailChain:
         UrlGuardrail(
             allow_domains=cfg.guard_allow_domains,
             check_reachable=cfg.guard_check_reachable,
+            probe_timeout=cfg.probe_timeout,
+            probe_user_agent=cfg.probe_user_agent,
         ),
         DestructiveCommandGuardrail(),
     ])
