@@ -89,8 +89,17 @@ class Config:
     llm_api_key: str = "lm-studio"
 
     # --- Guardrails (guardrails.* in config.yaml) ---
+    # Master switches for each guard, plus a per-pattern off-list for the destructive
+    # blocklist. These are what the control dashboard toggles (dashboard/server.py).
+    guard_url_enabled: bool = True
+    guard_destructive_enabled: bool = True
     guard_allow_domains: list[str] = field(default_factory=list)
     guard_check_reachable: bool = True
+    # Keys (see guardrails._DESTRUCTIVE_PATTERNS) of destructive patterns to DISABLE.
+    guard_disabled_patterns: list[str] = field(default_factory=list)
+    # JSON file holding user-defined (custom) destructive rules. Empty => the default
+    # <repo>/custom_guardrails.json (resolved in rules_store).
+    guard_custom_rules_file: str = ""
     # URL-reachability probe (UrlGuardrail._http_probe).
     probe_timeout: float = 5.0
     probe_user_agent: str = "Mozilla/5.0 (agentmem url-guardrail)"
@@ -114,13 +123,23 @@ class Config:
             llm_model=os.environ.get("LLM_MODEL", cls.llm_model),
             llm_base_url=os.environ.get("LLM_BASE_URL", cls.llm_base_url),
             llm_api_key=os.environ.get("LLM_API_KEY", cls.llm_api_key),
+            guard_url_enabled=_env_bool("GUARD_URL_ENABLED", cls.guard_url_enabled),
+            guard_destructive_enabled=_env_bool("GUARD_DESTRUCTIVE_ENABLED", cls.guard_destructive_enabled),
             guard_allow_domains=_env_list("GUARD_ALLOW_DOMAINS"),
             guard_check_reachable=_env_bool("GUARD_CHECK_REACHABLE", cls.guard_check_reachable),
+            guard_disabled_patterns=_env_list("GUARD_DISABLED_PATTERNS"),
+            guard_custom_rules_file=os.environ.get("GUARD_CUSTOM_RULES_FILE", cls.guard_custom_rules_file),
             probe_timeout=float(os.environ.get("PROBE_TIMEOUT", cls.probe_timeout)),
             probe_user_agent=os.environ.get("PROBE_USER_AGENT", cls.probe_user_agent),
             lesson_search_limit=int(os.environ.get("LESSON_SEARCH_LIMIT", cls.lesson_search_limit)),
             lesson_list_limit=int(os.environ.get("LESSON_LIST_LIMIT", cls.lesson_list_limit)),
         )
+
+
+def custom_rules_path(cfg: Config) -> Path:
+    """Resolve the custom-rules JSON file (config value, or the repo-root default)."""
+    return Path(cfg.guard_custom_rules_file) if cfg.guard_custom_rules_file \
+        else _REPO_ROOT / "custom_guardrails.json"
 
 
 def load() -> Config:

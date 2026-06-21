@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🤖 AgentScalator-Claude
+# 🤖 Support Engineer
 
 ### A self-improving automation agent for enterprise support — built _on_ Claude Code, not just _with_ it.
 
@@ -24,7 +24,7 @@
 
 ### What is this?
 
-**AgentScalator-Claude is an automation agent for enterprise support tasks.** It runs on
+**Support Engineer is an automation agent for enterprise support tasks.** It runs on
 **Claude Code**: the agent loop, the reasoning, and the vision (reading screenshots) are
 all _native_ to the model — there is no orchestration framework to maintain.
 
@@ -179,19 +179,24 @@ Both guards **fail open**: a bug or missing dependency never wedges the agent.
 ### Project layout
 
 ```
-AgentScalator-Claude/
+support-engineer/
 ├── CLAUDE.md                 # the operating flow (instructions = behaviour)
 ├── config.env                # all settings (KEY=VALUE) — single source of config
 ├── docker-compose.yml        # Qdrant on localhost:6333
 ├── .mcp.json                 # wires the `memory` MCP server
+├── start_dashboard.sh        # launch the control panel + open the browser
 ├── hooks/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recall lessons
 │   └── guardrail_check.py    # PreToolUse → veto bad URLs / destructive cmds
+├── dashboard/                # the control panel (stdlib HTTP server + web UI)
+│   ├── server.py             # backend: config.env / settings.json / lessons API
+│   └── assets/               # layered front-end (api, dom, views, app)
 └── src/agentmem/             # ← the only real code
     ├── config.py             # config layer (config.env → env vars → defaults)
     ├── lesson.py             # Lesson entity + origin / counters
     ├── store.py              # Mem0LessonStore over Qdrant (semantic)
     ├── guardrails.py         # URL + destructive-command guards
+    ├── rules_store.py        # custom (user-defined) blocked-command rules
     └── mcp_server.py         # exposes lesson_* as MCP tools
 ```
 
@@ -217,6 +222,33 @@ for a remote OpenAI-compatible one, set `EMBEDDER_PROVIDER=openai` +
 `EMBEDDER_MODEL / BASE_URL / API_KEY / DIMS` (changing dimensions needs a fresh Qdrant
 collection).
 
+### Control panel
+
+A visual control panel for a level-3 engineer to inspect and change everything the agent
+exposes — no terminal needed. It is a dependency-free **stdlib HTTP server** + a layered
+web UI (Tailwind); the embedder/Qdrant aside, it runs fully offline.
+
+```bash
+./start_dashboard.sh            # starts the server and opens http://localhost:8787
+./start_dashboard.sh 9000       # custom port
+# or, manually:
+python dashboard/server.py --port 8787
+```
+
+> Qdrant must be up (`docker compose up -d`) for the **Lessons** tab; the rest works without it.
+
+| Tab | What you control |
+|-----|------------------|
+| **Guardrails** | URL guard on/off, reachability probe, domain allowlist, probe timeout/UA; destructive-guard master switch; how each guard works. |
+| **Commands** | The full blocklist (built-in + **custom rules you add**, each toggled on/off or deleted) and the allowlist — **move commands either way** (allowed ⇆ blocked). |
+| **Lessons** | Live counts (total / pending / approved) and the pending-review queue with **Validate** / **Reject**. |
+| **Memory** | Qdrant host/port/collection/namespace, embedder provider/model/dims, retrieval limits. |
+
+Edits are written back to [`config.env`](./config.env), `.claude/settings.json`
+(permissions only) and `custom_guardrails.json` (user rules) — and apply on the agent's
+next tool call. New config keys: `GUARD_URL_ENABLED`, `GUARD_DESTRUCTIVE_ENABLED`,
+`GUARD_DISABLED_PATTERNS`, `GUARD_CUSTOM_RULES_FILE`.
+
 ### Slash commands
 
 | Command | Does |
@@ -232,7 +264,7 @@ collection).
 
 ### ¿Qué es esto?
 
-**AgentScalator-Claude es un agente de automatización para tareas de soporte
+**Support Engineer es un agente de automatización para tareas de soporte
 empresarial.** Funciona sobre **Claude Code**: el bucle del agente, el razonamiento y la
 visión (leer capturas) son _nativos_ del modelo — no hay framework de orquestación que
 mantener.
@@ -391,19 +423,24 @@ bloquean al agente.
 ### Estructura del proyecto
 
 ```
-AgentScalator-Claude/
+support-engineer/
 ├── CLAUDE.md                 # el flujo operativo (instrucciones = comportamiento)
 ├── config.env                # todos los ajustes (KEY=VALUE) — fuente única de config
 ├── docker-compose.yml        # Qdrant en localhost:6333
 ├── .mcp.json                 # cablea el servidor MCP `memory`
+├── start_dashboard.sh        # arranca el panel de control + abre el navegador
 ├── hooks/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recuerda lecciones
 │   └── guardrail_check.py    # PreToolUse → veta URLs malas / comandos destructivos
+├── dashboard/                # el panel de control (servidor HTTP stdlib + UI web)
+│   ├── server.py             # backend: API de config.env / settings.json / lecciones
+│   └── assets/               # front-end por capas (api, dom, views, app)
 └── src/agentmem/             # ← el único código real
     ├── config.py             # capa de config (config.env → env vars → defaults)
     ├── lesson.py             # entidad Lesson + origen / contadores
     ├── store.py              # Mem0LessonStore sobre Qdrant (semántico)
     ├── guardrails.py         # guards de URL + comandos destructivos
+    ├── rules_store.py        # reglas de comandos bloqueados definidas por el usuario
     └── mcp_server.py         # expone lesson_* como tools MCP
 ```
 
@@ -429,6 +466,34 @@ Apunta a otro fichero con `AGENTMEM_CONFIG=/ruta/al/fichero`. Para cambiar el em
 local por uno remoto compatible con OpenAI, define `EMBEDDER_PROVIDER=openai` +
 `EMBEDDER_MODEL / BASE_URL / API_KEY / DIMS` (cambiar la dimensión exige una colección
 Qdrant nueva).
+
+### Panel de control
+
+Un panel visual para que un ingeniero de nivel 3 inspeccione y cambie todo lo que el
+agente expone — sin tocar la terminal. Es un **servidor HTTP de la stdlib** (sin
+dependencias) + una UI web por capas (Tailwind); salvo el embedder/Qdrant, funciona 100%
+offline.
+
+```bash
+./start_dashboard.sh            # arranca el servidor y abre http://localhost:8787
+./start_dashboard.sh 9000       # puerto a medida
+# o, manualmente:
+python dashboard/server.py --port 8787
+```
+
+> Qdrant debe estar arriba (`docker compose up -d`) para la pestaña **Lecciones**; el resto funciona sin él.
+
+| Pestaña | Qué controlas |
+|---------|---------------|
+| **Guardrails** | Guard de URL on/off, probe de accesibilidad, allowlist de dominios, timeout/UA; interruptor maestro del guard destructivo; cómo funciona cada guard. |
+| **Comandos** | La blocklist completa (built-in + **reglas custom que añades**, cada una activable o eliminable) y la allowlist — **mueve comandos en ambos sentidos** (permitido ⇆ bloqueado). |
+| **Lecciones** | Conteos en vivo (total / por revisar / aprobadas) y la cola pendiente con **Validar** / **Rechazar**. |
+| **Memoria** | Host/puerto/colección/namespace de Qdrant, provider/modelo/dims del embedder, límites de recuperación. |
+
+Los cambios se escriben en [`config.env`](./config.env), `.claude/settings.json` (solo
+permisos) y `custom_guardrails.json` (reglas de usuario) — y aplican en la siguiente
+llamada del agente. Nuevas claves de config: `GUARD_URL_ENABLED`,
+`GUARD_DESTRUCTIVE_ENABLED`, `GUARD_DISABLED_PATTERNS`, `GUARD_CUSTOM_RULES_FILE`.
 
 ### Comandos slash
 

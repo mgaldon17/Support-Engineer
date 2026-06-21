@@ -7,3 +7,5 @@ __pycache__/
 .playwright-mcp/
 logs/
 *.pyc
+# control panel runtime state (user-defined blocked rules, created on demand)
+custom_guardrails.json

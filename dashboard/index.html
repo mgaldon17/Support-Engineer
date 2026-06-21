@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Support Engineer · Panel de control</title>
+
+  <!-- Tailwind (Play CDN) + design tokens. App styles live in assets/css/styles.css -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {
+        fontFamily: { mono: ['ui-monospace','SFMono-Regular','Menlo','monospace'] },
+        colors: { ink: '#070b15', panel: '#111729', edge: '#1e2742' },
+      } }
+    };
+  </script>
+  <link rel="stylesheet" href="/assets/css/styles.css" />
+</head>
+<body class="text-slate-200 min-h-screen antialiased">
+  <div class="max-w-6xl mx-auto px-5 py-8">
+
+    <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <div class="flex items-center gap-4">
+        <div class="brand-badge">🛟</div>
+        <div>
+          <h1 class="text-2xl font-bold tracking-tight">Support Engineer</h1>
+          <p class="text-sm text-slate-400">Panel de control — guardrails, comandos y memoria del agente.</p>
+        </div>
+      </div>
+      <button id="reload" class="btn-ghost">↻ Recargar</button>
+    </header>
+
+    <!-- live stats -->
+    <section id="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></section>
+
+    <!-- tab navigation (populated by app.js) -->
+    <nav id="tabs" class="flex flex-wrap gap-1 mb-6 border-b border-edge/70"></nav>
+
+    <!-- active view mounts here -->
+    <main id="view" class="animate-fadein"></main>
+
+    <footer class="text-center text-xs text-slate-600 mt-12">
+      Support Engineer · config: <span id="cfgfile" class="font-mono"></span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>

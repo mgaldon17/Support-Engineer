@@ -1,4 +1,4 @@
-"""agentmem — the only real code in AgentScalator-Claude.
+"""agentmem — the only real code in Support Engineer.
 
 Claude Code is the runtime (loop, reasoning, vision); this package supplies the
 three things Claude Code does not give for free:
