@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentmem"
+version = "0.1.0"
+description = "Lesson memory (Qdrant/mem0) + guardrails for AgentScalator-Claude: the only real code; Claude Code is the runtime."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mem0ai>=0.1",
+    "qdrant-client>=1.7",
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+agentmem-server = "agentmem.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentmem*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]

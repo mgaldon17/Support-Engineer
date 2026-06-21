@@ -1,0 +1,59 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/inject_lessons.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__pw__browser_navigate|mcp__dc__start_process",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/guardrail_check.py"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "mcp__memory__lesson_search",
+      "mcp__memory__lesson_add",
+      "mcp__memory__lesson_inject",
+      "mcp__memory__lesson_reinforce",
+      "mcp__memory__lesson_record_failure",
+      "mcp__memory__lesson_list",
+      "mcp__memory__lesson_resolve",
+      "mcp__memory__lesson_delete",
+      "mcp__pw__browser_navigate",
+      "mcp__pw__browser_evaluate",
+      "mcp__pw__browser_snapshot",
+      "mcp__pw__browser_take_screenshot",
+      "mcp__pw__browser_handle_dialog",
+      "mcp__pw__browser_click",
+      "mcp__pw__browser_type",
+      "mcp__dc__read_file",
+      "mcp__dc__list_directory",
+      "mcp__dc__get_file_info",
+      "mcp__dc__list_processes",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(docker compose up -d)",
+      "Bash(docker compose ps*)",
+      "Bash(python -m pytest*)"
+    ]
+  }
+}
