@@ -19,6 +19,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, field_validator
 
+from .atomicio import atomic_write_text
+
 
 class CustomRule(BaseModel):
     key: str
@@ -62,10 +64,8 @@ class CustomRuleStore:
 
     # ---- write --------------------------------------------------------- #
     def _save(self, rules: list[CustomRule]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
         payload = [r.model_dump() for r in rules]
-        self._path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-                              encoding="utf-8")
+        atomic_write_text(self._path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
     def add(self, *, reason: str, regex: str, enabled: bool = True) -> CustomRule:
         reason = (reason or "").strip()

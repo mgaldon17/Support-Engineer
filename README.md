@@ -189,12 +189,17 @@ support-engineer/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recall lessons
 │   └── guardrail_check.py    # PreToolUse → veto bad URLs / destructive cmds
 ├── dashboard/                # the control panel (stdlib HTTP server + web UI)
-│   ├── server.py             # backend: config.env / settings.json / lessons API
+│   ├── server.py             # thin HTTP coordinator: routing + dispatch
+│   ├── envfile.py            # config.env read/write (atomic, comment-preserving)
+│   ├── settings_store.py     # settings.json permissions allowlist (atomic)
+│   ├── translation.py        # glob ↔ blocklist-regex helpers (pure)
 │   └── assets/               # layered front-end (api, dom, views, app)
 └── src/agentmem/             # ← the only real code
     ├── config.py             # config layer (config.env → env vars → defaults)
     ├── lesson.py             # Lesson entity + origin / counters
+    ├── ports.py              # LessonStore Protocol (the store abstraction)
     ├── store.py              # Mem0LessonStore over Qdrant (semantic)
+    ├── atomicio.py           # atomic text-file writes (temp file + rename)
     ├── guardrails.py         # URL + destructive-command guards
     ├── rules_store.py        # custom (user-defined) blocked-command rules
     └── mcp_server.py         # exposes lesson_* as MCP tools
@@ -433,12 +438,17 @@ support-engineer/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recuerda lecciones
 │   └── guardrail_check.py    # PreToolUse → veta URLs malas / comandos destructivos
 ├── dashboard/                # el panel de control (servidor HTTP stdlib + UI web)
-│   ├── server.py             # backend: API de config.env / settings.json / lecciones
+│   ├── server.py             # coordinador HTTP fino: enrutado + dispatch
+│   ├── envfile.py            # lectura/escritura de config.env (atómica, conserva comentarios)
+│   ├── settings_store.py     # allowlist de permisos en settings.json (atómica)
+│   ├── translation.py        # helpers glob ↔ regex de bloqueo (puros)
 │   └── assets/               # front-end por capas (api, dom, views, app)
 └── src/agentmem/             # ← el único código real
     ├── config.py             # capa de config (config.env → env vars → defaults)
     ├── lesson.py             # entidad Lesson + origen / contadores
+    ├── ports.py              # Protocol LessonStore (la abstracción del almacén)
     ├── store.py              # Mem0LessonStore sobre Qdrant (semántico)
+    ├── atomicio.py           # escrituras atómicas de ficheros (temp + rename)
     ├── guardrails.py         # guards de URL + comandos destructivos
     ├── rules_store.py        # reglas de comandos bloqueados definidas por el usuario
     └── mcp_server.py         # expone lesson_* como tools MCP

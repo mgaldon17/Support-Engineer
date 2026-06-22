@@ -59,6 +59,8 @@ async def test_url_guard_ignores_unrelated_tools():
         "m" "kfs.ext4 /dev/sda1",
         "dd if=/dev/zero of=/dev/sda bs=1M",
         "git push --force origin main",
+        "git push -f origin main",
+        "git push origin master -f",
         "shutdown -h now",
     ],
 )
@@ -68,7 +70,16 @@ async def test_destructive_commands_are_vetoed(command):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["ls -la", "git push origin feature", "rm note.txt"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls -la",
+        "git push origin feature",
+        "rm note.txt",
+        'git commit -m "reboot the retry logic"',   # word "reboot" in text, not a command
+        "grep halt /var/log/syslog",                # word "halt" as an argument
+    ],
+)
 async def test_safe_commands_are_allowed(command):
     g = DestructiveCommandGuardrail()
     assert (await g.check("Bash", {"command": command})).allow is True

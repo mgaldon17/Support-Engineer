@@ -2,17 +2,24 @@
 // they depend on the injected `actions` (see app.js), which depend on this Api object.
 // Single responsibility: turn intentions into requests and return parsed JSON.
 
+// Parse a JSON response, surfacing a transport-level (non-2xx) failure as a thrown
+// Error so callers can handle "server down / 500" instead of getting silent undefined.
+async function asJson(res) {
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 async function post(url, body) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {}),
   });
-  return res.json();
+  return asJson(res);
 }
 
 export const Api = {
-  getState: () => fetch('/api/state').then((r) => r.json()),
+  getState: () => fetch('/api/state').then(asJson),
 
   saveConfig: (config) => post('/api/save', config),
 

@@ -4,7 +4,7 @@ Ported verbatim from ``agentcore/domain/lesson.py`` and the ``LessonOrigin`` enu
 ``agentcore/domain/enums.py``. A lesson is ``title`` + ``content`` (the procedure /
 knowledge body) plus two counters the agent folds back: ``reuse`` (++ when a retrieved
 lesson actually helped) and ``failure_count`` (++ when it didn't). Origin tells
-``learned`` Ha(derived by the agent, pending human review) from ``human_authored``
+``learned`` (derived by the agent, pending human review) from ``human_authored``
 (entered/curated by a human). Relevance and ranking live in the store (semantic
 retrieval) — the lesson stays a plain value object.
 """

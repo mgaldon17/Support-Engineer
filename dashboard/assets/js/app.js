@@ -22,25 +22,31 @@ function settle(res, okMsg) {
   toast('Error: ' + ((res && res.error) || 'falló'), false);
 }
 
+// Run an Api call: on success settle (toast + refresh); on a transport/network failure
+// surface it as a toast instead of leaving an unhandled promise rejection.
+function run(promise, okMsg) {
+  return promise.then((r) => settle(r, okMsg)).catch((e) => toast('Error: ' + e.message, false));
+}
+
 const actions = {
   warn: (msg) => toast(msg, false),
   goTo: (id) => selectTab(id),
 
-  setBool: (field, value) => Api.saveConfig({ [field]: value }).then((r) => settle(r, 'Guardado')),
-  saveConfig: (partial) => Api.saveConfig(partial).then((r) => settle(r, 'Configuración guardada')),
+  setBool: (field, value) => run(Api.saveConfig({ [field]: value }), 'Guardado'),
+  saveConfig: (partial) => run(Api.saveConfig(partial), 'Configuración guardada'),
 
   toggleRule: (key, enabled, source) =>
-    Api.rule.toggle(key, enabled, source).then((r) => settle(r, enabled ? 'Regla activada' : 'Regla desactivada')),
-  addRule: (reason, regex) => Api.rule.add(reason, regex).then((r) => settle(r, 'Comando bloqueado añadido')),
-  deleteRule: (key) => Api.rule.remove(key).then((r) => settle(r, 'Regla eliminada')),
+    run(Api.rule.toggle(key, enabled, source), enabled ? 'Regla activada' : 'Regla desactivada'),
+  addRule: (reason, regex) => run(Api.rule.add(reason, regex), 'Comando bloqueado añadido'),
+  deleteRule: (key) => run(Api.rule.remove(key), 'Regla eliminada'),
 
-  allowedAdd: (entry) => Api.allowed.add(entry).then((r) => settle(r, 'Permiso añadido')),
-  allowedRemove: (entry) => Api.allowed.remove(entry).then((r) => settle(r, 'Permiso eliminado')),
-  allowedToBlocked: (entry) => Api.allowed.toBlocked(entry).then((r) => settle(r, 'Movido a bloqueados')),
-  blockedToAllowed: (key) => Api.blocked.toAllowed(key).then((r) => settle(r, 'Movido a permitidos')),
+  allowedAdd: (entry) => run(Api.allowed.add(entry), 'Permiso añadido'),
+  allowedRemove: (entry) => run(Api.allowed.remove(entry), 'Permiso eliminado'),
+  allowedToBlocked: (entry) => run(Api.allowed.toBlocked(entry), 'Movido a bloqueados'),
+  blockedToAllowed: (key) => run(Api.blocked.toAllowed(key), 'Movido a permitidos'),
 
   lesson: (action, id) =>
-    Api.lesson(action, id).then((r) => settle(r, action === 'resolve' ? 'Lección validada' : 'Lección eliminada')),
+    run(Api.lesson(action, id), action === 'resolve' ? 'Lección validada' : 'Lección eliminada'),
 };
 
 // ---- rendering -------------------------------------------------------- //
@@ -84,7 +90,12 @@ function selectTab(id) {
 }
 
 async function refresh() {
-  state = await Api.getState();
+  try {
+    state = await Api.getState();
+  } catch (e) {
+    toast('No se pudo contactar el panel: ' + e.message, false);
+    return;
+  }
   h('#cfgfile').textContent = state.config_file;
   renderStats();
   renderTabs();
