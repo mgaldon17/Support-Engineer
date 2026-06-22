@@ -1,0 +1,31 @@
+name: CodeQL
+
+on:
+  pull_request:        # any target branch
+  schedule:
+    # Weekly scan catches newly-disclosed vulnerability patterns even with no PR activity.
+    - cron: '27 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # python = the agentmem package + dashboard backend + hooks; javascript = the SPA.
+        language: [python, javascript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          queries: security-and-quality
+      # No compilation step: both languages are interpreted, so autobuild is unnecessary.
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

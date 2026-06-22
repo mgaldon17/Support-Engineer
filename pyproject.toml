@@ -24,6 +24,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [project.scripts]
@@ -36,4 +38,22 @@ include = ["agentmem*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["src"]
+# src/ for the agentmem package; dashboard/ so tests can import the extracted server
+# helpers (envfile, settings_store, translation, server) without an install step.
+pythonpath = ["src", "dashboard"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# `l` is the project's established idiom for a "lesson" (loops, factories, views), so the
+# ambiguous-variable-name check is intentionally disabled rather than renaming everywhere.
+ignore = ["E741"]
+
+[tool.mypy]
+python_version = "3.11"
+# The store backends (mem0, qdrant) ship no type stubs and are imported lazily; we type
+# our own package against the LessonStore Protocol, not the third-party internals.
+ignore_missing_imports = true
+files = ["src/agentmem"]

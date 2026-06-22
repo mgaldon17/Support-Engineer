@@ -7,5 +7,7 @@ __pycache__/
 .playwright-mcp/
 logs/
 *.pyc
+# JS tooling (ESLint) — installed deps only; package-lock.json IS committed (npm ci)
+node_modules/
 # control panel runtime state (user-defined blocked rules, created on demand)
 custom_guardrails.json

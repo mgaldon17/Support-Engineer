@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Python dependencies declared in pyproject.toml (runtime + dev extras).
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # The GitHub Actions pinned in .github/workflows (checkout, setup-python, codeql, …).
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
