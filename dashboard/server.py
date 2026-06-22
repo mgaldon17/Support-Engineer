@@ -11,10 +11,10 @@ and change it from a browser, with NO extra dependencies (offline, Python stdlib
   * Lessons       — live counts and the pending-review queue (Approve / Reject).
   * Memory        — Qdrant / embedder / retrieval settings.
 
-This module is the *transport + persistence* layer only: HTTP routing, reading/writing
-``config.env`` (comment-preserving), ``.claude/settings.json`` (permissions.allow) and
-delegating custom rules to ``agentmem.rules_store`` and lessons to ``agentmem.store``.
-The UI lives in ``index.html`` + ``assets/`` (served statically).
+This module is a thin HTTP coordinator: routing + dispatch. The persistence concerns it
+used to own are now focused collaborators — ``EnvFile`` (config.env), ``SettingsStore``
+(settings.json) and ``translation`` (glob<->regex) — plus ``agentmem.rules_store`` (custom
+rules) and ``agentmem.store`` (lessons). The UI lives in ``index.html`` + ``assets/``.
 
 Run:  python dashboard/server.py            # -> http://localhost:8787
       python dashboard/server.py --port 9000
@@ -26,21 +26,33 @@ import argparse
 import asyncio
 import json
 import os
-import re
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent
 sys.path.insert(0, str(_REPO_ROOT / "src"))
+sys.path.insert(0, str(_HERE))  # so the dashboard's own modules import as top-level
 
 from agentmem.config import Config, custom_rules_path, load as load_config  # noqa: E402
 from agentmem import guardrails as gr  # noqa: E402
 from agentmem.rules_store import CustomRuleStore  # noqa: E402
+from envfile import EnvFile  # noqa: E402
+from settings_store import SettingsStore  # noqa: E402
+from translation import bash_inner, glob_to_regex, regex_to_glob  # noqa: E402
 
 _CONFIG_FILE = Path(os.environ.get("AGENTMEM_CONFIG", _REPO_ROOT / "config.env"))
 _SETTINGS_FILE = _REPO_ROOT / ".claude" / "settings.json"
+
+_ENV = EnvFile(_CONFIG_FILE)
+_SETTINGS = SettingsStore(_SETTINGS_FILE)
+
+# Every mutating request is serialised on this lock so the read-modify-write sequences
+# on config.env / settings.json / custom_guardrails.json cannot interleave across the
+# threaded server (atomic writes additionally keep concurrent GET reads from tearing).
+_WRITE_LOCK = threading.Lock()
 
 _CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
@@ -51,46 +63,18 @@ _CONTENT_TYPES = {
 
 
 # --------------------------------------------------------------------------- #
-# config.env read / write (comment-preserving)
+# config.env writes (delegated to EnvFile) + os.environ sync
 # --------------------------------------------------------------------------- #
-def _read_env() -> dict[str, str]:
-    out: dict[str, str] = {}
-    try:
-        text = _CONFIG_FILE.read_text(encoding="utf-8")
-    except OSError:
-        return out
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        out[key.strip()] = value.strip().strip('"').strip("'")
-    return out
-
-
 def _write_env(updates: dict[str, str]) -> None:
-    """Update existing KEY= lines in place; append new keys. Comments preserved."""
-    try:
-        lines = _CONFIG_FILE.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        lines = []
-    seen: set[str] = set()
-    for i, raw in enumerate(lines):
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key = stripped.partition("=")[0].strip()
-        if key in updates:
-            lines[i] = f"{key}={updates[key]}"
-            seen.add(key)
-    extra = [f"{k}={v}" for k, v in updates.items() if k not in seen]
-    if extra:
-        lines += ["", "# --- added by control panel ---", *extra]
-    _CONFIG_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _ENV.write(updates)
+    # Keep the long-running process in sync. load_config() reads os.environ, which is
+    # populated ONCE via setdefault (config._load_env_file); without this, a save would
+    # not be reflected by the next /api/state until the server restarts.
+    os.environ.update(updates)
 
 
 def _disabled_set() -> set[str]:
-    raw = _read_env().get("GUARD_DISABLED_PATTERNS", "")
+    raw = _ENV.read().get("GUARD_DISABLED_PATTERNS", "")
     return {k.strip().lower() for k in raw.split(",") if k.strip()}
 
 
@@ -101,38 +85,14 @@ def _set_builtin_enabled(key: str, enabled: bool) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# settings.json permissions (allowed list)
+# settings.json permissions (delegated to SettingsStore)
 # --------------------------------------------------------------------------- #
-def _settings_read() -> dict:
-    try:
-        return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def _settings_write(data: dict) -> None:
-    _SETTINGS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-                              encoding="utf-8")
-
-
 def _allow_list() -> list[str]:
-    return list(_settings_read().get("permissions", {}).get("allow", []))
+    return _SETTINGS.allow_list()
 
 
 def _set_allow_list(entries: list[str]) -> None:
-    data = _settings_read()
-    data.setdefault("permissions", {})["allow"] = entries
-    _settings_write(data)
-
-
-def _bash_inner(entry: str) -> str | None:
-    m = re.fullmatch(r"Bash\((.*)\)", entry.strip())
-    return m.group(1) if m else None
-
-
-def _glob_to_regex(glob: str) -> str:
-    """A shell-permission glob (`rm -rf *`) -> an anchored-ish regex for the blocklist."""
-    return r"\b" + ".*".join(re.escape(p) for p in glob.split("*"))
+    _SETTINGS.set_allow_list(entries)
 
 
 # --------------------------------------------------------------------------- #
@@ -159,11 +119,30 @@ def _merged_patterns() -> list[dict]:
 # --------------------------------------------------------------------------- #
 # lessons (live store) — degrades gracefully if Qdrant is down
 # --------------------------------------------------------------------------- #
+# Building a mem0 store re-initialises the Qdrant client and (re)loads the embedder
+# model, so it is cached by the memory-config fields that define it instead of being
+# rebuilt on every /api/state. Access is guarded because GET requests are not locked.
+_store_cache: dict[tuple, object] = {}
+_store_lock = threading.Lock()
+
+
+def _lesson_store(cfg: Config):
+    from agentmem.store import build_store
+
+    key = (cfg.qdrant_host, cfg.qdrant_port, cfg.collection, cfg.mem_user,
+           cfg.embedder_provider, cfg.embedder_model, cfg.embedder_base_url,
+           cfg.embedder_dims, cfg.lesson_list_limit)
+    with _store_lock:
+        store = _store_cache.get(key)
+        if store is None:
+            store = build_store(cfg)
+            _store_cache[key] = store
+        return store
+
+
 def _lessons_snapshot() -> dict:
     try:
-        from agentmem.store import build_store
-
-        lessons = asyncio.run(build_store(load_config()).list())
+        lessons = asyncio.run(_lesson_store(load_config()).list())
         items = [{
             "id": l.lesson_id, "title": l.title or "(sin título)", "content": l.content,
             "origin": str(l.origin), "reuse": l.reuse,
@@ -181,9 +160,7 @@ def _lessons_snapshot() -> dict:
 
 
 def _lesson_action(action: str, lesson_id: str) -> dict:
-    from agentmem.store import build_store
-
-    store = build_store(load_config())
+    store = _lesson_store(load_config())
     if action == "resolve":
         return {"ok": asyncio.run(store.resolve(lesson_id)) is not None}
     if action == "delete":
@@ -215,7 +192,7 @@ def _state() -> dict:
         },
         "patterns": _merged_patterns(),
         "policed_tools": gr.policed_tools(),
-        "permissions": [{"entry": e, "bash": _bash_inner(e) is not None} for e in allow],
+        "permissions": [{"entry": e, "bash": bash_inner(e) is not None} for e in allow],
         "config_file": str(_CONFIG_FILE),
         "lessons": _lessons_snapshot(),
     }
@@ -288,10 +265,10 @@ def _allowed_remove(payload: dict) -> dict:
 def _allowed_to_blocked(payload: dict) -> dict:
     """Move an allowed Bash command into the blocklist as a custom rule."""
     entry = str(payload.get("entry", "")).strip()
-    inner = _bash_inner(entry)
+    inner = bash_inner(entry)
     if inner is None:
         return {"ok": False, "error": "only Bash(...) permissions can become a blocked command"}
-    rule = _store().add(reason=f"moved from allowlist: {inner}", regex=_glob_to_regex(inner))
+    rule = _store().add(reason=f"moved from allowlist: {inner}", regex=glob_to_regex(inner))
     _set_allow_list([e for e in _allow_list() if e != entry])
     return {"ok": True, "rule": rule.model_dump()}
 
@@ -302,7 +279,7 @@ def _blocked_to_allowed(payload: dict) -> dict:
     rule = next((r for r in _store().load() if r.key == key), None)
     if rule is None:
         return {"ok": False, "error": "custom rule not found"}
-    inner = re.sub(r"\\(.)", r"\1", rule.regex.replace(r"\b", "").replace(".*", "*"))
+    inner = regex_to_glob(rule.regex)
     allow = _allow_list()
     candidate = f"Bash({inner})"
     if candidate not in allow:
@@ -344,7 +321,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_file(self, rel: str) -> None:
         target = (_HERE / rel.lstrip("/")).resolve()
-        if _HERE not in target.parents and target != _HERE / rel.lstrip("/"):
+        if not target.is_relative_to(_HERE):   # symlink-safe containment check
             return self._json({"error": "forbidden"}, 403)
         try:
             ctype = _CONTENT_TYPES.get(target.suffix, "application/octet-stream")
@@ -376,7 +353,9 @@ class Handler(BaseHTTPRequestHandler):
         if handler is None:
             return self._json({"error": "not found"}, 404)
         try:
-            self._json(handler(self._body()))
+            with _WRITE_LOCK:                   # serialise mutating requests
+                result = handler(self._body())
+            self._json(result)
         except ValueError as exc:           # validation errors -> 400 with message
             self._json({"ok": False, "error": str(exc)}, 400)
         except Exception as exc:

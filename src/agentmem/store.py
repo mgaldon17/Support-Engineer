@@ -17,6 +17,7 @@ import logging
 
 from .config import Config
 from .lesson import Lesson, LessonOrigin
+from .ports import LessonStore
 
 _log = logging.getLogger("agentmem.store")
 
@@ -74,7 +75,7 @@ class Mem0LessonStore:
 
     async def update(self, lesson: Lesson) -> None:
         await asyncio.to_thread(
-            self._mem.update, lesson.lesson_id, lesson.content, _metadata(lesson)
+            self._mem.update, lesson.lesson_id, lesson.content, metadata=_metadata(lesson)
         )
 
     async def delete(self, lesson_id: str) -> bool:
@@ -142,7 +143,7 @@ def _embedder_config(cfg: Config) -> dict:
     return embedder_cfg
 
 
-def build_store(cfg: Config) -> Mem0LessonStore:
+def build_store(cfg: Config) -> LessonStore:
     """Construct a mem0-backed store: Qdrant (Docker, persistent) + the configured
     embedder. mem0 also requires an LLM object even when we never infer; we point it
     at the configured endpoint so construction needs no hosted key."""

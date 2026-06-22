@@ -25,7 +25,8 @@ from mcp.server.fastmcp import FastMCP
 
 from .config import Config, load
 from .lesson import Lesson
-from .store import Mem0LessonStore, build_store
+from .ports import LessonStore
+from .store import build_store
 
 _log = logging.getLogger("agentmem.mcp_server")
 
@@ -33,7 +34,7 @@ mcp = FastMCP("agentmem")
 
 
 @lru_cache(maxsize=1)
-def _store() -> Mem0LessonStore:
+def _store() -> LessonStore:
     """Build the store once, lazily — so importing the module (e.g. list_tools)
     doesn't require Qdrant to be up until a tool actually runs."""
     return build_store(load())

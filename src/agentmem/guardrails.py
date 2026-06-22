@@ -153,14 +153,21 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
     ("dd_to_device", re.compile(r"\bdd\b[^\n]*\bof=/dev/"), "raw write to a block device (dd of=/dev/...)"),
     ("redirect_to_disk", re.compile(r">\s*/dev/(sd|nvme|disk|hd)"), "redirect over a raw disk device"),
     ("fork_bomb", re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&?\s*\}\s*;\s*:"), "fork bomb"),
+    # A force flag in any common spelling: --force, --force-with-lease, the short -f,
+    # or a bundled short flag (-fu / -uf). The old patterns only matched the literal
+    # "--force" and let the everyday `git push -f origin main` slip through.
     ("force_push_main",
-     re.compile(r"\bgit\s+push\b[^\n]*--force[^\n]*\b(origin\s+)?(main|master)\b"),
-     "force-push to main/master (--force before branch)"),
+     re.compile(r"\bgit\s+push\b[^\n]*\s(?:--force(?:-with-lease)?|-[a-zA-Z]*f[a-zA-Z]*)\b[^\n]*\b(origin\s+)?(main|master)\b"),
+     "force-push to main/master (force flag before branch)"),
     ("force_push_main_alt",
-     re.compile(r"\bgit\s+push\b[^\n]*\b(main|master)\b[^\n]*--force"),
-     "force-push to main/master (--force after branch)"),
+     re.compile(r"\bgit\s+push\b[^\n]*\b(main|master)\b[^\n]*\s(?:--force(?:-with-lease)?|-[a-zA-Z]*f[a-zA-Z]*)\b"),
+     "force-push to main/master (force flag after branch)"),
     ("chmod_777_root", re.compile(r"\bchmod\s+-R\s+0*7{3,4}\s+/"), "recursive chmod 777 on a root path"),
-    ("host_shutdown", re.compile(r"\bshutdown\b|\breboot\b|\bhalt\b|\bpoweroff\b"), "host shutdown/reboot"),
+    # Anchored to a command position (start, after a ;/&&/|| separator, or after sudo) so
+    # ordinary text like git commit -m "reboot the retry logic" is not vetoed.
+    ("host_shutdown",
+     re.compile(r"(?:^|[;&|]\s*|\bsudo\s+)(shutdown|reboot|halt|poweroff)\b"),
+     "host shutdown/reboot"),
 ]
 
 
