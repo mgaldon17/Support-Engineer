@@ -55,9 +55,18 @@ jobs:
         run: pip install -e .
       - run: pip install pip-audit
       - name: Audit installed dependencies
-        # If a transitive advisory has no fix yet, triage it by appending its id:
-        #   pip-audit --ignore-vuln GHSA-xxxx-xxxx-xxxx
-        run: pip-audit
+        # Risk-accepted transitive advisories in `transformers` (pulled by
+        # sentence-transformers, the local embedder). Both are RCE-via-deserialization of
+        # UNTRUSTED checkpoint files in components this project never invokes — we only run
+        # inference with a fixed, trusted HuggingFace model, never training or conversion:
+        #   - CVE-2026-1839  : torch.load() in the Trainer class (we don't train).
+        #   - PYSEC-2025-217 : X-CLIP checkpoint-conversion script (we don't use X-CLIP).
+        # Neither has a usable stable fix (CVE: only 5.0.0rc3 pre-release; PYSEC: none).
+        # Re-audit and drop these waivers when a stable transformers fix ships.
+        run: >
+          pip-audit
+          --ignore-vuln CVE-2026-1839
+          --ignore-vuln PYSEC-2025-217
 
   # 4. CVE gate on the JavaScript toolchain (the ESLint devDependency tree). Fails only on
   #    high/critical so low-severity dev-only noise does not block PRs.
