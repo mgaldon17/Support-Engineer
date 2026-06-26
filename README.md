@@ -1,3 +1,4 @@
+
 <div align="center">
 
 # 🤖 Support Engineer
@@ -519,3 +520,5 @@ llamada del agente. Nuevas claves de config: `GUARD_URL_ENABLED`,
 **Built on 🤖 [Claude Code](https://claude.com/claude-code) · Powered by 🧠 [mem0](https://mem0.ai/) + [Qdrant](https://qdrant.tech/)**
 
 </div>
+=======
+
