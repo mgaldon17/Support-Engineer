@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "memory": {
+      "command": "python",
+      "args": ["-m", "agentmem.mcp_server"],
+      "env": {
+        "PYTHONPATH": "src"
+      }
+    },
+    "pw": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    },
+    "dc": {
+      "command": "node",
+      "args": ["/Users/galdon/git/desktop-commander/dist/index.js"],
+      "cwd": "/Users/galdon/git/desktop-commander"
+    }
+  }
+}

@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentmem"
+version = "0.1.0"
+description = "Lesson memory (Qdrant/mem0) + guardrails for Support Engineer: the only real code; Claude Code is the runtime."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mem0ai>=0.1",
+    "qdrant-client>=1.7",
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    # Local, in-process embedder (no LM Studio / no API key) — the default backend.
+    # Pinned <5: 5.x pulls in torchcodec (audio/video) which needs FFmpeg libs we
+    # don't use and which break the import on macOS without ffmpeg installed.
+    "sentence-transformers>=2.2,<5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "build>=1.2",
+    "twine>=5.1",
+]
+
+[project.scripts]
+agentmem-server = "agentmem.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentmem*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# src/ for the agentmem package; dashboard/ so tests can import the extracted server
+# helpers (envfile, settings_store, translation, server) without an install step.
+pythonpath = ["src", "dashboard"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# `l` is the project's established idiom for a "lesson" (loops, factories, views), so the
+# ambiguous-variable-name check is intentionally disabled rather than renaming everywhere.
+ignore = ["E741"]
+
+[tool.mypy]
+python_version = "3.11"
+# The store backends (mem0, qdrant) ship no type stubs and are imported lazily; we type
+# our own package against the LessonStore Protocol, not the third-party internals.
+ignore_missing_imports = true
+files = ["src/agentmem"]
+
+[tool.coverage.run]
+source = ["src/agentmem", "dashboard"]
+# Excluded from the offline coverage gate because they only execute against a live
+# Qdrant / MCP runtime (their lines are exercised by integration tests, not unit tests):
+#   store.py      — the mem0/Qdrant-backed lesson store
+#   mcp_server.py — the FastMCP stdio server
+omit = [
+    "src/agentmem/store.py",
+    "src/agentmem/mcp_server.py",
+    "src/agentmem/ports.py",   # pure Protocol (interface stubs, no executable logic)
+]
+
+[tool.coverage.report]
+# Lines that are not meaningfully unit-coverable.
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",            # Protocol / abstract method stubs
+]
+show_missing = true
+fail_under = 70
