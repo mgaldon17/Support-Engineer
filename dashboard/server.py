@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Support Engineer — control panel backend (stdlib-only HTTP server).
+"""Support Engineer — control panel backend (stdlib HTTP server).
 
 Exposes the user-controllable surface of the agent so a level-3 engineer can inspect
-and change it from a browser, with NO extra dependencies (offline, Python stdlib):
+and change it from a browser, offline (stdlib HTTP; YAML config IO via ruamel.yaml):
 
   * Guardrails    — master switches, the URL allowlist/probe, and the full destructive
                     blocklist (built-in patterns toggled on/off + custom rules the user
@@ -12,7 +12,7 @@ and change it from a browser, with NO extra dependencies (offline, Python stdlib
   * Memory        — Qdrant / embedder / retrieval settings.
 
 This module is a thin HTTP coordinator: routing + dispatch. The persistence concerns it
-used to own are now focused collaborators — ``EnvFile`` (config.env), ``SettingsStore``
+used to own are now focused collaborators — ``ConfigFile`` (config.yaml), ``SettingsStore``
 (settings.json) and ``translation`` (glob<->regex) — plus ``agentmem.rules_store`` (custom
 rules) and ``agentmem.store`` (lessons). The UI lives in ``index.html`` + ``assets/``.
 
@@ -39,18 +39,18 @@ sys.path.insert(0, str(_HERE))  # so the dashboard's own modules import as top-l
 from agentmem.config import Config, custom_rules_path, load as load_config  # noqa: E402
 from agentmem import guardrails as gr  # noqa: E402
 from agentmem.rules_store import CustomRuleStore  # noqa: E402
-from envfile import EnvFile  # noqa: E402
+from configfile import ConfigFile  # noqa: E402
 from settings_store import SettingsStore  # noqa: E402
 from translation import bash_inner, glob_to_regex, regex_to_glob  # noqa: E402
 
-_CONFIG_FILE = Path(os.environ.get("AGENTMEM_CONFIG", _REPO_ROOT / "config.env"))
+_CONFIG_FILE = Path(os.environ.get("AGENTMEM_CONFIG", _REPO_ROOT / "config.yaml"))
 _SETTINGS_FILE = _REPO_ROOT / ".claude" / "settings.json"
 
-_ENV = EnvFile(_CONFIG_FILE)
+_CFG = ConfigFile(_CONFIG_FILE)
 _SETTINGS = SettingsStore(_SETTINGS_FILE)
 
 # Every mutating request is serialised on this lock so the read-modify-write sequences
-# on config.env / settings.json / custom_guardrails.json cannot interleave across the
+# on config.yaml / settings.json / custom_guardrails.json cannot interleave across the
 # threaded server (atomic writes additionally keep concurrent GET reads from tearing).
 _WRITE_LOCK = threading.Lock()
 
@@ -63,18 +63,18 @@ _CONTENT_TYPES = {
 
 
 # --------------------------------------------------------------------------- #
-# config.env writes (delegated to EnvFile) + os.environ sync
+# config.yaml writes (delegated to ConfigFile) + os.environ sync
 # --------------------------------------------------------------------------- #
 def _write_env(updates: dict[str, str]) -> None:
-    _ENV.write(updates)
+    _CFG.write(updates)
     # Keep the long-running process in sync. load_config() reads os.environ, which is
-    # populated ONCE via setdefault (config._load_env_file); without this, a save would
+    # populated ONCE via setdefault (config._load_config_file); without this, a save would
     # not be reflected by the next /api/state until the server restarts.
     os.environ.update(updates)
 
 
 def _disabled_set() -> set[str]:
-    raw = _ENV.read().get("GUARD_DISABLED_PATTERNS", "")
+    raw = _CFG.read().get("GUARD_DISABLED_PATTERNS", "")
     return {k.strip().lower() for k in raw.split(",") if k.strip()}
 
 
