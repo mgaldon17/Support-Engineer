@@ -1,3 +1,4 @@
+
 <div align="center">
 
 # 🤖 Support Engineer
@@ -666,3 +667,5 @@ llamada del agente. El panel edita el YAML in situ (conservando comentarios) baj
 **Built on 🤖 [Claude Code](https://claude.com/claude-code) · Powered by 🧠 [mem0](https://mem0.ai/) + [Qdrant](https://qdrant.tech/)**
 
 </div>
+=======
+

@@ -27,8 +27,11 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "build>=1.2",
+    "twine>=5.1",
 ]
 
 [project.scripts]
@@ -60,3 +63,26 @@ python_version = "3.11"
 # our own package against the LessonStore Protocol, not the third-party internals.
 ignore_missing_imports = true
 files = ["src/agentmem"]
+
+[tool.coverage.run]
+source = ["src/agentmem", "dashboard"]
+# Excluded from the offline coverage gate because they only execute against a live
+# Qdrant / MCP runtime (their lines are exercised by integration tests, not unit tests):
+#   store.py      — the mem0/Qdrant-backed lesson store
+#   mcp_server.py — the FastMCP stdio server
+omit = [
+    "src/agentmem/store.py",
+    "src/agentmem/mcp_server.py",
+    "src/agentmem/ports.py",   # pure Protocol (interface stubs, no executable logic)
+]
+
+[tool.coverage.report]
+# Lines that are not meaningfully unit-coverable.
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",            # Protocol / abstract method stubs
+]
+show_missing = true
+fail_under = 70

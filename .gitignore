@@ -1,15 +1,27 @@
 __pycache__/
 *.py[cod]
+*.pyc
 .pytest_cache/
 *.egg-info/
+# Python build output
+build/
+dist/
+# Coverage reports (pytest --cov)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
 .mem0/
 .venv/
 .playwright-mcp/
 logs/
-*.pyc
+# OS cruft
+.DS_Store
 # JS tooling (ESLint) — installed deps only; package-lock.json IS committed (npm ci)
 node_modules/
 # control panel runtime state (user-defined blocked rules, created on demand)
 custom_guardrails.json
 # secrets — API keys live here, never committed (.env.example is the tracked template)
 .env
+# generated audit artifact (/solid-scan output, not versioned)
+.claude/solid-report.md
