@@ -21,5 +21,7 @@ logs/
 node_modules/
 # control panel runtime state (user-defined blocked rules, created on demand)
 custom_guardrails.json
+# secrets — API keys live here, never committed (.env.example is the tracked template)
+.env
 # generated audit artifact (/solid-scan output, not versioned)
 .claude/solid-report.md

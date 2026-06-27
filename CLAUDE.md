@@ -102,13 +102,23 @@ a URL).
 ## Setup
 
 - `docker compose up -d` starts Qdrant (the lesson store) on `localhost:6333`.
-- `pip install -e .` installs `agentmem` (mem0 + qdrant-client + mcp + httpx). The
-  `memory` MCP server runs as `python -m agentmem.mcp_server` (wired in `.mcp.json`).
-- Memory/embedder/guardrail settings live in `config.env` (KEY=VALUE) at the repo root,
-  loaded by `src/agentmem/config.py`; a real environment variable overrides the file,
-  and the file overrides the built-in defaults (point elsewhere with `AGENTMEM_CONFIG`).
-  The embedder runs **locally in-process** (sentence-transformers, multilingual MiniLM)
-  — no LM Studio, no API key, fully offline after the model downloads once. To use a
-  remote OpenAI-compatible embedder instead, set `EMBEDDER_PROVIDER=openai` +
-  `EMBEDDER_MODEL/BASE_URL/API_KEY/DIMS`. Changing the embedder requires a fresh Qdrant
-  collection (the vector dimension changes).
+- `pip install -e .` installs `agentmem` (mem0 + qdrant-client + mcp + httpx +
+  ruamel.yaml). The `memory` MCP server runs as `python -m agentmem.mcp_server` (wired in
+  `.mcp.json`).
+- Memory/embedder/LLM/guardrail settings live in `config.yaml` (nested by section) at the
+  repo root, loaded by `src/agentmem/config.py`; each `section.key` maps to a flat env
+  name via `config._FIELD_MAP`. A real environment variable overrides the file, and the
+  file overrides the built-in defaults (point elsewhere with `AGENTMEM_CONFIG`). **Secrets
+  (API keys) live only in a gitignored `.env`** (loaded first, `AGENTMEM_DOTENV` to
+  relocate); `config.yaml` references them as `${EMBEDDER_API_KEY}` / `${LLM_API_KEY}` and
+  the loader expands the placeholders. The
+  embedder runs **locally in-process** (sentence-transformers, multilingual MiniLM) — no
+  LM Studio, no API key, fully offline after the model downloads once. To use a remote
+  OpenAI-compatible embedder instead, set `embedder.provider: openai` +
+  `model/base_url/api_key/dims`. Changing the embedder requires a fresh Qdrant collection
+  (the vector dimension changes).
+- The `llm.*` block is only exercised when `llm.infer: true` (mem0 rewrites/reconciles a
+  lesson's text on write via that LLM); with the default `infer: false` mem0 builds the
+  LLM but never calls it — `add` stores the lesson verbatim and `search` is pure vector
+  similarity. The `temperature/top_p/max_tokens` params affect only that `infer: true`
+  write path, never retrieval.

@@ -36,7 +36,7 @@ export default {
       </section>
 
       <section class="card lg:col-span-2 flex items-center justify-between">
-        <p class="text-sm text-slate-400">Los cambios se escriben en <span class="chip">config.env</span>.</p>
+        <p class="text-sm text-slate-400">Los cambios se escriben en <span class="chip">config.yaml</span>.</p>
         <button class="btn-primary" data-act="save">Guardar configuración de memoria</button>
       </section>
     </div>`;
