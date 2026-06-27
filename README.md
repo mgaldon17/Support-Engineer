@@ -3,7 +3,7 @@
 
 # 🤖 Support Engineer
 
-### A self-improving automation agent for enterprise support — built _on_ Claude Code, not just _with_ it.
+### A self-learning automation agent for enterprise support — built _on_ Claude Code, not just _with_ it.
 
 **The loop, the reasoning and the vision are native. The only real code is a memory that lets the agent _learn_.**
 
@@ -33,12 +33,12 @@ The repository contributes **two things on top of Claude Code**:
 
 | Piece | What it adds |
 |-------|--------------|
-| 🧠 **`agentmem`** — a lesson memory over Qdrant, exposed as the `memory` MCP server | The agent **remembers procedures** that worked and **reuses them by meaning**, so it gets better every time. |
+| 🧠 **`agentmem`** — a lesson memory over Qdrant, exposed as the `memory` MCP server | The agent **remembers procedures** that worked and **reuses them by meaning**, so it learns from each solved task instead of starting from scratch. |
 | 🪝 **Two hooks** — auto-inject lessons + apply guardrails | Relevant memory is **fed in automatically**, and dangerous actions are **vetoed in code** before they run. |
 
 > Everything else — the operating flow — is **instructions**, not code. They live in
 > [`CLAUDE.md`](./CLAUDE.md) and steer the model directly. The "scalator" idea: the agent
-> _scales its own competence_ by turning each solved task into reusable memory.
+> _learns on its own_, turning each solved task into reusable memory.
 
 ### The big picture
 
@@ -352,12 +352,12 @@ El repositorio aporta **dos cosas encima de Claude Code**:
 
 | Pieza | Qué añade |
 |-------|-----------|
-| 🧠 **`agentmem`** — una memoria de lecciones sobre Qdrant, expuesta como el servidor MCP `memory` | El agente **recuerda procedimientos** que funcionaron y los **reutiliza por significado**, así que mejora cada vez. |
+| 🧠 **`agentmem`** — una memoria de lecciones sobre Qdrant, expuesta como el servidor MCP `memory` | El agente **recuerda procedimientos** que funcionaron y los **reutiliza por significado**, así que aprende de cada tarea en lugar de empezar de cero. |
 | 🪝 **Dos hooks** — auto-inyectar lecciones + aplicar guardarraíles | La memoria relevante se **inyecta automáticamente**, y las acciones peligrosas se **vetan en código** antes de ejecutarse. |
 
 > Todo lo demás — el flujo operativo — son **instrucciones**, no código. Viven en
 > [`CLAUDE.md`](./CLAUDE.md) y guían al modelo directamente. La idea "scalator": el agente
-> _escala su propia competencia_ convirtiendo cada tarea resuelta en memoria reutilizable.
+> _aprende solo_, convirtiendo cada tarea resuelta en memoria reutilizable.
 
 ### La visión de conjunto
 
