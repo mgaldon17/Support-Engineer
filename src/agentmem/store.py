@@ -7,16 +7,15 @@ configurable) mem0 keeps the procedure verbatim (no LLM fact-extraction) and onl
 embedder/vector store are exercised; ``infer=True`` lets mem0's single LLM call rewrite/
 reconcile the text on write. mem0's sync API is run in a thread so the store stays async.
 
-``mem0ai`` + ``qdrant-client`` are required (see pyproject); imported lazily so unit
-tests that monkeypatch the store don't need them.
+``mem0ai`` + ``qdrant-client`` (and ``httpx``, used only by the embedder preflight) are
+required at runtime (see pyproject) but imported lazily, so importing this module — and
+unit-testing the pure helpers (``_mem0_config``, ``_to_lesson``) — needs none of them.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-
-import httpx
 
 from .config import Config
 from .constants import EmbedderProvider, Mem0Key, MetaKey
@@ -27,7 +26,8 @@ _log = logging.getLogger("agentmem.store")
 
 # Remote embedder providers and where to probe them. The local in-process providers
 # (huggingface / fastembed) are absent here — they need no network and are never checked.
-_REMOTE_EMBEDDERS = {
+# Typed with str keys (StrEnum members ARE str) so a plain ``provider.lower()`` indexes it.
+_REMOTE_EMBEDDERS: dict[str, str] = {
     EmbedderProvider.OLLAMA: "http://localhost:11434",  # default when base_url is empty
     EmbedderProvider.OPENAI: "https://api.openai.com/v1",
     EmbedderProvider.LMSTUDIO: "http://localhost:1234/v1",
@@ -165,6 +165,8 @@ def _check_embedder_reachable(cfg: Config) -> None:
     provider we probe the endpoint; for ollama we additionally confirm the model is
     actually pulled (an up-but-modelless ollama would silently fail to embed). Raises a
     clear RuntimeError instead of letting the store build against a dead embedder."""
+    import httpx  # lazy — keeps the module importable in a minimal env (see module docstring)
+
     provider = cfg.embedder_provider.lower()
     if provider not in _REMOTE_EMBEDDERS:
         return

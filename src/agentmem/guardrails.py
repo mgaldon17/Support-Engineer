@@ -50,7 +50,8 @@ Probe = Callable[[str], Awaitable[bool]]   # url -> reachable?
 
 # Tools whose URL argument we police. Claude Code namespaces MCP tools as
 # ``mcp__<server>__<tool>``; the sibling repo used the flat ``pw_browser_navigate``.
-_URL_TOOLS = {ToolName.PW_NAVIGATE, ToolName.PW_NAVIGATE_FLAT}
+# Typed as str (StrEnum members ARE str) so a plain runtime ``tool_name`` matches.
+_URL_TOOLS: set[str] = {ToolName.PW_NAVIGATE, ToolName.PW_NAVIGATE_FLAT}
 
 # Probe defaults when a UrlGuardrail is built without a Config (e.g. tests). Production
 # values come from Config (probe_timeout / probe_user_agent) via build_chain.
@@ -137,7 +138,7 @@ class UrlGuardrail(Guardrail):
 # 2. Destructive-command guardrail (NEW)
 # --------------------------------------------------------------------------- #
 # Tools that run a shell command, and the arg holding the command string.
-_COMMAND_TOOLS = {
+_COMMAND_TOOLS: dict[str, str] = {
     ToolName.BASH: "command",
     ToolName.DC_START_PROCESS_FLAT: "command",
     ToolName.DC_START_PROCESS: "command",
