@@ -1,0 +1,76 @@
+# agentmem configuration — nested YAML, loaded by src/agentmem/config.py.
+#
+# Precedence: a real environment variable always wins over a value set here, which in
+# turn wins over the dataclass defaults in config.py. Each "section.key" below maps to a
+# flat ENV name via config._FIELD_MAP (e.g. memory.qdrant_host -> QDRANT_HOST). Point at
+# a different file with AGENTMEM_CONFIG=/path/to/file.
+#
+# The values below restate the built-in defaults, so editing them changes behaviour from
+# one place. SECRETS (API keys) do NOT live here — they sit in a gitignored `.env` and are
+# referenced below as ${EMBEDDER_API_KEY} / ${LLM_API_KEY} (see `.env.example`).
+
+# --- Qdrant / mem0 ---
+memory:
+  qdrant_host: localhost
+  qdrant_port: 6333
+  collection: agentcore_lessons
+  # Namespace for mem0's identity filters; all lessons share it.
+  mem_user: agentcore
+
+# --- Embedder ---
+# Default is a LOCAL, in-process embedder (sentence-transformers via mem0's "huggingface"
+# provider): no server, no API key, offline after the one-time download. For a remote
+# OpenAI-compatible embedder set provider: openai (or lmstudio) plus model/base_url/
+# api_key/dims.
+embedder:
+  provider: huggingface
+  model: paraphrase-multilingual-MiniLM-L12-v2
+  base_url: ""
+  api_key: ${EMBEDDER_API_KEY}   # from .env (empty for the local huggingface embedder)
+  # MUST match the model's output dim (384 for the default MiniLM, 768 nomic, 1536 for
+  # OpenAI text-embedding-3). Changing it requires a fresh Qdrant collection.
+  dims: 384
+  # For a REMOTE embedder (ollama/openai/lmstudio), preflight that the endpoint is up
+  # (and, for ollama, that the model is pulled) before building the store — so a down
+  # embedder fails loudly instead of writing empty vectors to Qdrant. No-op for the local
+  # huggingface/fastembed providers.
+  check_reachable: true
+
+# --- LLM ---
+# With infer: false (default) mem0 builds this LLM but NEVER calls it — add() stores the
+# lesson verbatim (embedder only) and search() is pure vector similarity. Set infer: true
+# to let mem0 use the LLM to extract/reconcile facts on WRITE (it rewrites what gets
+# stored). temperature/top_p/max_tokens apply ONLY to that infer: true write path; they do
+# NOT affect retrieval, which never invokes an LLM.
+llm:
+  infer: true
+  provider: openai
+  model: qwen2.5-7b-instruct-1m
+  base_url: http://localhost:1234/v1
+  api_key: ${LLM_API_KEY}   # from .env
+  temperature: 0.1
+  top_p: 1.0
+  max_tokens: 2000
+
+# --- Guardrails ---
+# Master switches (toggled from the control dashboard, dashboard/server.py).
+guardrails:
+  url_enabled: true
+  destructive_enabled: true
+  # Comma-separated host allowlist for browser navigation; empty = allow any host.
+  allow_domains: ""
+  check_reachable: true
+  # Comma-separated KEYS of destructive patterns to DISABLE (empty = all active). Keys:
+  # rm_root_home, mkfs, dd_to_device, redirect_to_disk, fork_bomb, force_push_main,
+  # force_push_main_alt, chmod_777_root, host_shutdown.
+  disabled_patterns: ""
+  # JSON file of user-defined destructive rules; empty = <repo>/custom_guardrails.json.
+  custom_rules_file: ""
+  # URL-reachability probe (UrlGuardrail).
+  probe_timeout: 5.0
+  probe_user_agent: "Mozilla/5.0 (agentmem url-guardrail)"
+
+# --- Retrieval ---
+retrieval:
+  search_limit: 8
+  list_limit: 1000

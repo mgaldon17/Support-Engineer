@@ -13,8 +13,8 @@
     },
     "dc": {
       "command": "node",
-      "args": ["/Users/galdon/git/desktop-commander/dist/index.js"],
-      "cwd": "/Users/galdon/git/desktop-commander"
+      "args": ["${DC_MCP_HOME}/dist/index.js"],
+      "cwd": "${DC_MCP_HOME}"
     }
   }
 }

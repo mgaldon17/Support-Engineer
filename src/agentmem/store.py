@@ -2,9 +2,10 @@
 
 Ported from ``agentcore/infrastructure/mem0_store.py``. Stores each lesson as a mem0
 memory: the procedure text is the memory body and the metadata carries
-title/origin/reuse/failure_count/pending_review. ``infer=False`` so mem0 keeps the
-procedure verbatim (no LLM fact-extraction) and only its embedder/vector store are
-exercised. mem0's sync API is run in a thread so the store stays async.
+title/origin/reuse/failure_count/pending_review. With ``infer=False`` (the default,
+configurable) mem0 keeps the procedure verbatim (no LLM fact-extraction) and only its
+embedder/vector store are exercised; ``infer=True`` lets mem0's single LLM call rewrite/
+reconcile the text on write. mem0's sync API is run in a thread so the store stays async.
 
 ``mem0ai`` + ``qdrant-client`` are required (see pyproject); imported lazily so unit
 tests that monkeypatch the store don't need them.
@@ -15,11 +16,21 @@ from __future__ import annotations
 import asyncio
 import logging
 
+import httpx
+
 from .config import Config
 from .lesson import Lesson, LessonOrigin
 from .ports import LessonStore
 
 _log = logging.getLogger("agentmem.store")
+
+# Remote embedder providers and where to probe them. The local in-process providers
+# (huggingface / fastembed) are absent here — they need no network and are never checked.
+_REMOTE_EMBEDDERS = {
+    "ollama": "http://localhost:11434",     # default when embedder.base_url is empty
+    "openai": "https://api.openai.com/v1",
+    "lmstudio": "http://localhost:1234/v1",
+}
 
 # Default namespace / list cap when the store is built without a Config (e.g. tests).
 # Production values come from Config (mem_user / lesson_list_limit) via build_store.
@@ -55,15 +66,18 @@ def _metadata(lesson: Lesson) -> dict:
 
 
 class Mem0LessonStore:
-    def __init__(self, memory, *, user: str = _USER, list_limit: int = _LIST_LIMIT) -> None:
+    def __init__(
+        self, memory, *, user: str = _USER, list_limit: int = _LIST_LIMIT, infer: bool = False
+    ) -> None:
         self._mem = memory          # a mem0.Memory instance
         self._user = user           # namespace for mem0's identity filters
         self._list_limit = list_limit
+        self._infer = infer         # True => mem0's LLM rewrites/reconciles text on add()
 
     async def add(self, lesson: Lesson) -> None:
         res = await asyncio.to_thread(
             self._mem.add, lesson.content,
-            user_id=self._user, metadata=_metadata(lesson), infer=False,
+            user_id=self._user, metadata=_metadata(lesson), infer=self._infer,
         )
         items = (res or {}).get("results") or []
         if items:  # adopt mem0's id so get/update/delete address the same record
@@ -143,16 +157,56 @@ def _embedder_config(cfg: Config) -> dict:
     return embedder_cfg
 
 
+def _check_embedder_reachable(cfg: Config) -> None:
+    """Preflight a REMOTE embedder so we never write empty/garbage vectors to Qdrant.
+
+    Local providers (huggingface/fastembed) embed in-process → skipped. For a remote
+    provider we probe the endpoint; for ollama we additionally confirm the model is
+    actually pulled (an up-but-modelless ollama would silently fail to embed). Raises a
+    clear RuntimeError instead of letting the store build against a dead embedder."""
+    provider = cfg.embedder_provider.lower()
+    if provider not in _REMOTE_EMBEDDERS:
+        return
+    base = (cfg.embedder_base_url or _REMOTE_EMBEDDERS[provider]).rstrip("/")
+    try:
+        if provider == "ollama":
+            resp = httpx.get(f"{base}/api/tags", timeout=cfg.probe_timeout)
+            resp.raise_for_status()
+            pulled = {m.get("name", "").split(":")[0] for m in resp.json().get("models", [])}
+            wanted = cfg.embedder_model.split(":")[0]
+            if wanted not in pulled:
+                raise RuntimeError(
+                    f"ollama is up at {base} but the embedder model '{cfg.embedder_model}' "
+                    f"is not pulled — run `ollama pull {cfg.embedder_model}`. Refusing to "
+                    f"build the store so no empty vectors are written to Qdrant."
+                )
+        else:  # openai / lmstudio and other OpenAI-compatible endpoints
+            resp = httpx.get(f"{base}/models", timeout=cfg.probe_timeout)
+            resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise RuntimeError(
+            f"embedder '{provider}' not reachable at {base} ({exc}). Start it (e.g. "
+            f"`ollama serve`) or fix embedder.base_url. Set embedder.check_reachable: false "
+            f"to skip this preflight. Refusing to build the store so no empty vectors are "
+            f"written to Qdrant."
+        ) from exc
+
+
 def build_store(cfg: Config) -> LessonStore:
     """Construct a mem0-backed store: Qdrant (Docker, persistent) + the configured
-    embedder. mem0 also requires an LLM object even when we never infer; we point it
-    at the configured endpoint so construction needs no hosted key."""
+    embedder. mem0 also requires an LLM object; with cfg.infer=False it is built but
+    never called, so the configured endpoint needs no hosted key. The LLM's
+    provider/model/sampling matter only when cfg.infer=True (mem0's single add() rewrite
+    call); they never affect search, which uses no LLM."""
     try:
         from mem0 import Memory
     except ImportError as exc:  # pragma: no cover - optional extra
         raise RuntimeError(
             "agentmem needs the 'mem0ai' package: pip install -e '.'"
         ) from exc
+
+    if cfg.embedder_check_reachable:
+        _check_embedder_reachable(cfg)
 
     embedder_cfg = _embedder_config(cfg)
 
@@ -169,22 +223,27 @@ def build_store(cfg: Config) -> LessonStore:
             },
         },
         "embedder": {"provider": cfg.embedder_provider, "config": embedder_cfg},
-        # Unused with infer=False, but mem0 constructs it — keep it local (no key).
+        # Built by mem0 always; only CALLED when cfg.infer=True (the single add()-time
+        # fact-extraction call). Sampling params apply to that call, never to retrieval.
         "llm": {
-            "provider": "openai",
+            "provider": cfg.llm_provider,
             "config": {
                 "model": cfg.llm_model,
                 "openai_base_url": cfg.llm_base_url,
                 "api_key": cfg.llm_api_key,
+                "temperature": cfg.llm_temperature,
+                "top_p": cfg.llm_top_p,
+                "max_tokens": cfg.llm_max_tokens,
             },
         },
     }
     _log.info(
-        "building mem0 store (host=%s:%s, collection=%s)",
-        cfg.qdrant_host, cfg.qdrant_port, cfg.collection,
+        "building mem0 store (host=%s:%s, collection=%s, infer=%s)",
+        cfg.qdrant_host, cfg.qdrant_port, cfg.collection, cfg.infer,
     )
     return Mem0LessonStore(
         Memory.from_config(config),
         user=cfg.mem_user,
         list_limit=cfg.lesson_list_limit,
+        infer=cfg.infer,
     )
