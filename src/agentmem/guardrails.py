@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel
 
 from .config import Config
+from .constants import ToolName
 
 _log = logging.getLogger("agentmem.guardrail")
 
@@ -49,7 +50,7 @@ Probe = Callable[[str], Awaitable[bool]]   # url -> reachable?
 
 # Tools whose URL argument we police. Claude Code namespaces MCP tools as
 # ``mcp__<server>__<tool>``; the sibling repo used the flat ``pw_browser_navigate``.
-_URL_TOOLS = {"mcp__pw__browser_navigate", "pw_browser_navigate"}
+_URL_TOOLS = {ToolName.PW_NAVIGATE, ToolName.PW_NAVIGATE_FLAT}
 
 # Probe defaults when a UrlGuardrail is built without a Config (e.g. tests). Production
 # values come from Config (probe_timeout / probe_user_agent) via build_chain.
@@ -137,9 +138,9 @@ class UrlGuardrail(Guardrail):
 # --------------------------------------------------------------------------- #
 # Tools that run a shell command, and the arg holding the command string.
 _COMMAND_TOOLS = {
-    "Bash": "command",
-    "dc_start_process": "command",
-    "mcp__dc__start_process": "command",
+    ToolName.BASH: "command",
+    ToolName.DC_START_PROCESS_FLAT: "command",
+    ToolName.DC_START_PROCESS: "command",
 }
 
 # Patterns that almost never have a safe intent in an automated run. Kept narrow to

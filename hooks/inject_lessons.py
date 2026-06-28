@@ -47,7 +47,9 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError):
         return  # nothing usable on stdin
 
-    prompt = str(payload.get("prompt", "")).strip()
+    from agentmem.constants import HookEvent, HookKey, HookOut
+
+    prompt = str(payload.get(HookKey.PROMPT, "")).strip()
     if not prompt:
         return
 
@@ -61,9 +63,9 @@ def main() -> None:
         return
 
     out = {
-        "hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": _format(lessons),
+        HookOut.HOOK_SPECIFIC_OUTPUT: {
+            HookOut.HOOK_EVENT_NAME: HookEvent.USER_PROMPT_SUBMIT,
+            HookOut.ADDITIONAL_CONTEXT: _format(lessons),
         }
     }
     print(json.dumps(out))

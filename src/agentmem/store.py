@@ -19,6 +19,7 @@ import logging
 import httpx
 
 from .config import Config
+from .constants import EmbedderProvider, Mem0Key, MetaKey
 from .lesson import Lesson, LessonOrigin
 from .ports import LessonStore
 
@@ -27,9 +28,9 @@ _log = logging.getLogger("agentmem.store")
 # Remote embedder providers and where to probe them. The local in-process providers
 # (huggingface / fastembed) are absent here — they need no network and are never checked.
 _REMOTE_EMBEDDERS = {
-    "ollama": "http://localhost:11434",     # default when embedder.base_url is empty
-    "openai": "https://api.openai.com/v1",
-    "lmstudio": "http://localhost:1234/v1",
+    EmbedderProvider.OLLAMA: "http://localhost:11434",  # default when base_url is empty
+    EmbedderProvider.OPENAI: "https://api.openai.com/v1",
+    EmbedderProvider.LMSTUDIO: "http://localhost:1234/v1",
 }
 
 # Default namespace / list cap when the store is built without a Config (e.g. tests).
@@ -39,29 +40,29 @@ _LIST_LIMIT = 1000
 
 
 def _to_lesson(item: dict) -> Lesson:
-    md = item.get("metadata") or {}
+    md = item.get(Mem0Key.METADATA) or {}
     try:
-        origin = LessonOrigin(str(md.get("origin", "learned")))
+        origin = LessonOrigin(str(md.get(MetaKey.ORIGIN, LessonOrigin.LEARNED)))
     except ValueError:
         origin = LessonOrigin.LEARNED
     return Lesson(
-        lesson_id=str(item.get("id", "")),
-        title=str(md.get("title", "")),
-        content=str(item.get("memory", "")),
+        lesson_id=str(item.get(Mem0Key.ID, "")),
+        title=str(md.get(MetaKey.TITLE, "")),
+        content=str(item.get(Mem0Key.MEMORY, "")),
         origin=origin,
-        reuse=int(md.get("reuse", 0) or 0),
-        failure_count=int(md.get("failure_count", 0) or 0),
-        pending_review=bool(md.get("pending_review", False)),
+        reuse=int(md.get(MetaKey.REUSE, 0) or 0),
+        failure_count=int(md.get(MetaKey.FAILURE_COUNT, 0) or 0),
+        pending_review=bool(md.get(MetaKey.PENDING_REVIEW, False)),
     )
 
 
 def _metadata(lesson: Lesson) -> dict:
     return {
-        "title": lesson.title,
-        "origin": str(lesson.origin),
-        "reuse": lesson.reuse,
-        "failure_count": lesson.failure_count,
-        "pending_review": lesson.pending_review,
+        MetaKey.TITLE: lesson.title,
+        MetaKey.ORIGIN: str(lesson.origin),
+        MetaKey.REUSE: lesson.reuse,
+        MetaKey.FAILURE_COUNT: lesson.failure_count,
+        MetaKey.PENDING_REVIEW: lesson.pending_review,
     }
 
 
@@ -79,9 +80,9 @@ class Mem0LessonStore:
             self._mem.add, lesson.content,
             user_id=self._user, metadata=_metadata(lesson), infer=self._infer,
         )
-        items = (res or {}).get("results") or []
+        items = (res or {}).get(Mem0Key.RESULTS) or []
         if items:  # adopt mem0's id so get/update/delete address the same record
-            lesson.lesson_id = str(items[0].get("id", lesson.lesson_id))
+            lesson.lesson_id = str(items[0].get(Mem0Key.ID, lesson.lesson_id))
 
     async def get(self, lesson_id: str) -> Lesson | None:
         item = await asyncio.to_thread(self._mem.get, lesson_id)
@@ -100,15 +101,15 @@ class Mem0LessonStore:
 
     async def search(self, query: str, *, limit: int = 8) -> list[Lesson]:
         res = await asyncio.to_thread(
-            self._mem.search, query, top_k=limit, filters={"user_id": self._user}
+            self._mem.search, query, top_k=limit, filters={Mem0Key.USER_ID: self._user}
         )
-        return [_to_lesson(it) for it in (res or {}).get("results", [])]
+        return [_to_lesson(it) for it in (res or {}).get(Mem0Key.RESULTS, [])]
 
     async def list(self, *, pending_review: bool | None = None) -> list[Lesson]:
         res = await asyncio.to_thread(
-            self._mem.get_all, filters={"user_id": self._user}, top_k=self._list_limit
+            self._mem.get_all, filters={Mem0Key.USER_ID: self._user}, top_k=self._list_limit
         )
-        lessons = [_to_lesson(it) for it in (res or {}).get("results", [])]
+        lessons = [_to_lesson(it) for it in (res or {}).get(Mem0Key.RESULTS, [])]
         if pending_review is not None:
             lessons = [l for l in lessons if l.pending_review == pending_review]
         return lessons
@@ -143,9 +144,9 @@ def _embedder_config(cfg: Config) -> dict:
     URL + key; ``ollama`` takes its own base URL. The model name is always passed."""
     provider = cfg.embedder_provider.lower()
     embedder_cfg: dict = {"model": cfg.embedder_model}
-    if provider in ("huggingface", "fastembed"):
+    if provider in (EmbedderProvider.HUGGINGFACE, EmbedderProvider.FASTEMBED):
         return embedder_cfg
-    if provider == "ollama":
+    if provider == EmbedderProvider.OLLAMA:
         if cfg.embedder_base_url:
             embedder_cfg["ollama_base_url"] = cfg.embedder_base_url
         return embedder_cfg
@@ -169,7 +170,7 @@ def _check_embedder_reachable(cfg: Config) -> None:
         return
     base = (cfg.embedder_base_url or _REMOTE_EMBEDDERS[provider]).rstrip("/")
     try:
-        if provider == "ollama":
+        if provider == EmbedderProvider.OLLAMA:
             resp = httpx.get(f"{base}/api/tags", timeout=cfg.probe_timeout)
             resp.raise_for_status()
             pulled = {m.get("name", "").split(":")[0] for m in resp.json().get("models", [])}
@@ -192,25 +193,14 @@ def _check_embedder_reachable(cfg: Config) -> None:
         ) from exc
 
 
-def build_store(cfg: Config) -> LessonStore:
-    """Construct a mem0-backed store: Qdrant (Docker, persistent) + the configured
-    embedder. mem0 also requires an LLM object; with cfg.infer=False it is built but
-    never called, so the configured endpoint needs no hosted key. The LLM's
-    provider/model/sampling matter only when cfg.infer=True (mem0's single add() rewrite
-    call); they never affect search, which uses no LLM."""
-    try:
-        from mem0 import Memory
-    except ImportError as exc:  # pragma: no cover - optional extra
-        raise RuntimeError(
-            "agentmem needs the 'mem0ai' package: pip install -e '.'"
-        ) from exc
+def _mem0_config(cfg: Config) -> dict:
+    """Translate our ``Config`` into mem0's nested config schema (vector_store + embedder
+    + llm). Pure — no mem0 import, no I/O — so the mapping is unit-testable on its own.
 
-    if cfg.embedder_check_reachable:
-        _check_embedder_reachable(cfg)
-
-    embedder_cfg = _embedder_config(cfg)
-
-    config = {
+    The ``llm`` block is built unconditionally because mem0 requires it, but it is only
+    CALLED when ``cfg.infer=True`` (mem0's single add()-time fact-extraction call); its
+    sampling params apply to that call and never to retrieval."""
+    return {
         "vector_store": {
             "provider": "qdrant",
             "config": {
@@ -222,9 +212,7 @@ def build_store(cfg: Config) -> LessonStore:
                 "embedding_model_dims": cfg.embedder_dims,
             },
         },
-        "embedder": {"provider": cfg.embedder_provider, "config": embedder_cfg},
-        # Built by mem0 always; only CALLED when cfg.infer=True (the single add()-time
-        # fact-extraction call). Sampling params apply to that call, never to retrieval.
+        "embedder": {"provider": cfg.embedder_provider, "config": _embedder_config(cfg)},
         "llm": {
             "provider": cfg.llm_provider,
             "config": {
@@ -237,12 +225,29 @@ def build_store(cfg: Config) -> LessonStore:
             },
         },
     }
+
+
+def build_store(cfg: Config) -> LessonStore:
+    """Construct a mem0-backed store from an already-loaded ``Config`` (callers inject it
+    via ``build_store(load())`` — config loading stays out of here). Preflights the
+    embedder, maps the config (``_mem0_config``), then wraps mem0's ``Memory`` in a
+    ``Mem0LessonStore``."""
+    try:
+        from mem0 import Memory
+    except ImportError as exc:  # pragma: no cover - optional extra
+        raise RuntimeError(
+            "agentmem needs the 'mem0ai' package: pip install -e '.'"
+        ) from exc
+
+    if cfg.embedder_check_reachable:
+        _check_embedder_reachable(cfg)
+
     _log.info(
         "building mem0 store (host=%s:%s, collection=%s, infer=%s)",
         cfg.qdrant_host, cfg.qdrant_port, cfg.collection, cfg.infer,
     )
     return Mem0LessonStore(
-        Memory.from_config(config),
+        Memory.from_config(_mem0_config(cfg)),
         user=cfg.mem_user,
         list_limit=cfg.lesson_list_limit,
         infer=cfg.infer,

@@ -33,8 +33,10 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError):
         return
 
-    tool_name = str(payload.get("tool_name", ""))
-    tool_input = payload.get("tool_input") or {}
+    from agentmem.constants import Decision, HookEvent, HookKey, HookOut
+
+    tool_name = str(payload.get(HookKey.TOOL_NAME, ""))
+    tool_input = payload.get(HookKey.TOOL_INPUT) or {}
     if not isinstance(tool_input, dict):
         return
 
@@ -48,10 +50,10 @@ def main() -> None:
         return
 
     out = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": decision.reason,
+        HookOut.HOOK_SPECIFIC_OUTPUT: {
+            HookOut.HOOK_EVENT_NAME: HookEvent.PRE_TOOL_USE,
+            HookOut.PERMISSION_DECISION: Decision.DENY,
+            HookOut.PERMISSION_DECISION_REASON: decision.reason,
         }
     }
     print(json.dumps(out))
