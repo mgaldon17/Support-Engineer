@@ -20,7 +20,7 @@ dependencies = [
     # Local, in-process embedder (no LM Studio / no API key) — the default backend.
     # Pinned <5: 5.x pulls in torchcodec (audio/video) which needs FFmpeg libs we
     # don't use and which break the import on macOS without ffmpeg installed.
-    "sentence-transformers>=2.2,<5",
+    "sentence-transformers>=5.3.0",
 ]
 
 [project.optional-dependencies]
