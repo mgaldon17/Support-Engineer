@@ -24,6 +24,7 @@ from functools import lru_cache
 from mcp.server.fastmcp import FastMCP
 
 from .config import Config, load
+from .injection import scan_for_injection
 from .lesson import Lesson
 from .ports import LessonStore
 from .store import build_store
@@ -57,6 +58,16 @@ def _view(lesson: Lesson) -> dict:
     }
 
 
+def _screen(lesson: Lesson) -> list[str]:
+    """Scan a lesson for prompt-injection signatures before it is stored. On a hit, force
+    it into review (``pending_review=True``) so it is quarantined — it will not be
+    auto-injected (see hooks/inject_lessons) until a human clears it. Returns the hits."""
+    hits = scan_for_injection(f"{lesson.title}\n{lesson.content}")
+    if hits:
+        lesson.pending_review = True
+    return hits
+
+
 @mcp.tool()
 async def lesson_search(query: str, limit: int | None = None) -> list[dict]:
     """Semantically recall the lessons most relevant to ``query`` (by meaning, any
@@ -72,8 +83,12 @@ async def lesson_add(title: str, content: str) -> dict:
     """Record a NEW procedure the agent derived from a verified run. Stored as
     ``learned`` (pending_review=True → surfaces in /review)."""
     lesson = Lesson.learned(title=title, content=content)
+    hits = _screen(lesson)
     await _store().add(lesson)
-    return _view(lesson)
+    view = _view(lesson)
+    if hits:
+        view["warning"] = f"possible prompt injection ({', '.join(hits)}); quarantined for review"
+    return view
 
 
 @mcp.tool()
@@ -81,8 +96,15 @@ async def lesson_inject(title: str, content: str) -> dict:
     """Curate a HUMAN-authored procedure (trusted, no review). Replaces the old
     scripts/seed_lessons.py."""
     lesson = Lesson.human_authored(title=title, content=content)
+    # Defense-in-depth: even a "trusted" human-authored procedure is screened — a human
+    # may paste content copied from an untrusted source. A hit downgrades it to review
+    # (it loses its auto-trusted status) instead of being injected immediately.
+    hits = _screen(lesson)
     await _store().add(lesson)
-    return _view(lesson)
+    view = _view(lesson)
+    if hits:
+        view["warning"] = f"possible prompt injection ({', '.join(hits)}); quarantined for review"
+    return view
 
 
 @mcp.tool()

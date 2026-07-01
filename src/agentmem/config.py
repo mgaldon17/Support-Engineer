@@ -24,6 +24,8 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
+from .constants import EmbedderProvider, LlmProvider
+
 # config.py is at <repo>/src/agentmem/config.py → the repo root is three levels up.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CONFIG_FILE = _REPO_ROOT / "config.yaml"
@@ -166,7 +168,7 @@ class Config:
     # is downloaded once. The multilingual MiniLM handles the Spanish lessons well.
     # To use a remote OpenAI-compatible embedder instead (e.g. LM Studio), set
     # EMBEDDER_PROVIDER=openai (or lmstudio) + EMBEDDER_MODEL/BASE_URL/API_KEY.
-    embedder_provider: str = "huggingface"
+    embedder_provider: str = EmbedderProvider.HUGGINGFACE
     embedder_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     embedder_base_url: str = ""   # only for openai/lmstudio/ollama providers
     embedder_api_key: str = ""    # only for openai-compatible providers
@@ -188,7 +190,7 @@ class Config:
     # sampling params only take effect in that infer=true write path; they do NOT affect
     # retrieval, which never invokes an LLM.
     infer: bool = False
-    llm_provider: str = "openai"
+    llm_provider: str = LlmProvider.OPENAI
     llm_model: str = "qwen2.5-7b-instruct-1m"
     llm_base_url: str = "http://localhost:1234/v1"
     llm_api_key: str = "lm-studio"
