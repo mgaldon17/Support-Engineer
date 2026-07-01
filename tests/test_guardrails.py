@@ -56,7 +56,7 @@ async def test_url_guard_ignores_unrelated_tools():
     [
         "rm -rf /",
         "sudo rm -rf ~",
-        "m" "kfs.ext4 /dev/sda1",
+        "mkfs.ext4 /dev/sda1",
         "dd if=/dev/zero of=/dev/sda bs=1M",
         "git push --force origin main",
         "git push -f origin main",
