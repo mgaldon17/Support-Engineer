@@ -18,7 +18,7 @@ import pytest
 
 import server
 import translation
-from envfile import EnvFile
+from configfile import ConfigFile
 from settings_store import SettingsStore
 from agentmem.atomicio import atomic_write_text
 from agentmem.rules_store import CustomRuleStore
@@ -49,45 +49,52 @@ def test_glob_regex_roundtrip_recovers_the_glob():
 
 
 # --------------------------------------------------------------------------- #
-# EnvFile — comment-preserving, atomic config.env IO
+# ConfigFile — comment-preserving, atomic config.yaml IO (flat ENV <-> nested YAML)
 # --------------------------------------------------------------------------- #
-def test_envfile_write_then_read_roundtrip(tmp_path):
-    env = EnvFile(tmp_path / "config.env")
-    env.write({"QDRANT_HOST": "db", "QDRANT_PORT": "1234"})
-    assert env.read() == {"QDRANT_HOST": "db", "QDRANT_PORT": "1234"}
+def test_configfile_write_then_read_roundtrip(tmp_path):
+    cfg = ConfigFile(tmp_path / "config.yaml")
+    cfg.write({"QDRANT_HOST": "db", "QDRANT_PORT": "1234"})
+    assert cfg.read() == {"QDRANT_HOST": "db", "QDRANT_PORT": "1234"}
 
 
-def test_envfile_updates_in_place_and_preserves_comments(tmp_path):
-    f = tmp_path / "config.env"
-    f.write_text("# header\nQDRANT_HOST=old\n\n# section\nQDRANT_PORT=6333\n", encoding="utf-8")
-    EnvFile(f).write({"QDRANT_HOST": "new"})
+def test_configfile_maps_flat_keys_to_nested_sections(tmp_path):
+    f = tmp_path / "config.yaml"
+    ConfigFile(f).write({"QDRANT_HOST": "db", "LLM_TEMPERATURE": "0.7"})
     text = f.read_text(encoding="utf-8")
-    assert "# header" in text and "# section" in text          # comments preserved
-    assert "QDRANT_HOST=new" in text and "QDRANT_HOST=old" not in text  # updated in place
-    assert "QDRANT_PORT=6333" in text                          # untouched key kept
+    assert "memory:" in text and "qdrant_host: db" in text     # QDRANT_HOST -> memory.qdrant_host
+    assert "llm:" in text and "temperature: 0.7" in text       # LLM_TEMPERATURE -> llm.temperature
 
 
-def test_envfile_appends_unknown_keys(tmp_path):
-    f = tmp_path / "config.env"
-    f.write_text("EXISTING=1\n", encoding="utf-8")
-    EnvFile(f).write({"NEWKEY": "2"})
-    d = EnvFile(f).read()
-    assert d["EXISTING"] == "1" and d["NEWKEY"] == "2"
+def test_configfile_updates_in_place_and_preserves_comments(tmp_path):
+    f = tmp_path / "config.yaml"
+    f.write_text(
+        "# header\nmemory:\n  qdrant_host: old\n  # inline note\n  qdrant_port: 6333\n",
+        encoding="utf-8",
+    )
+    ConfigFile(f).write({"QDRANT_HOST": "new"})
+    text = f.read_text(encoding="utf-8")
+    assert "# header" in text and "# inline note" in text      # comments preserved
+    assert "qdrant_host: new" in text and "old" not in text    # updated in place
+    assert "qdrant_port: 6333" in text                         # untouched key kept
 
 
-def test_envfile_strips_quotes_and_skips_comments_on_read(tmp_path):
-    f = tmp_path / "config.env"
-    f.write_text('# c\nA="quoted"\nB=plain\n', encoding="utf-8")
-    assert EnvFile(f).read() == {"A": "quoted", "B": "plain"}
+def test_configfile_coerces_native_scalar_types(tmp_path):
+    f = tmp_path / "config.yaml"
+    ConfigFile(f).write({"GUARD_URL_ENABLED": "false", "QDRANT_PORT": "1234",
+                         "PROBE_TIMEOUT": "5.0"})
+    text = f.read_text(encoding="utf-8")
+    assert "url_enabled: false" in text                        # bool, not "false"
+    assert "qdrant_port: 1234" in text                         # int
+    assert "probe_timeout: 5.0" in text                        # float
 
 
-def test_envfile_missing_file_reads_empty(tmp_path):
-    assert EnvFile(tmp_path / "nope.env").read() == {}
+def test_configfile_missing_file_reads_empty(tmp_path):
+    assert ConfigFile(tmp_path / "nope.yaml").read() == {}
 
 
-def test_envfile_write_is_atomic_no_tmp_leftover(tmp_path):
-    EnvFile(tmp_path / "config.env").write({"A": "1"})
-    assert [p.name for p in tmp_path.iterdir()] == ["config.env"]
+def test_configfile_write_is_atomic_no_tmp_leftover(tmp_path):
+    ConfigFile(tmp_path / "config.yaml").write({"QDRANT_HOST": "db"})
+    assert [p.name for p in tmp_path.iterdir()] == ["config.yaml"]
 
 
 # --------------------------------------------------------------------------- #
@@ -132,12 +139,12 @@ def test_atomic_write_overwrites_and_leaves_no_tmp(tmp_path):
 # --------------------------------------------------------------------------- #
 @pytest.fixture
 def temp_server(tmp_path, monkeypatch):
-    cfg = tmp_path / "config.env"
-    cfg.write_text("PROBE_TIMEOUT=5.0\n", encoding="utf-8")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("guardrails:\n  probe_timeout: 5.0\n", encoding="utf-8")
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"permissions": {"allow": []}}) + "\n", encoding="utf-8")
     rules = tmp_path / "custom_guardrails.json"
-    monkeypatch.setattr(server, "_ENV", EnvFile(cfg))
+    monkeypatch.setattr(server, "_CFG", ConfigFile(cfg))
     monkeypatch.setattr(server, "_SETTINGS", SettingsStore(settings))
     monkeypatch.setattr(server, "_store", lambda: CustomRuleStore(rules))
     return {"cfg": cfg, "settings": settings, "rules": rules}
@@ -147,7 +154,7 @@ def test_save_writes_file_and_syncs_environ(temp_server, monkeypatch):
     monkeypatch.setenv("PROBE_TIMEOUT", "5.0")  # tracked by monkeypatch -> removed on teardown
     res = server._save({"probe_timeout": "9.5"})
     assert res["ok"] is True
-    assert "PROBE_TIMEOUT=9.5" in temp_server["cfg"].read_text(encoding="utf-8")
+    assert ConfigFile(temp_server["cfg"]).read()["PROBE_TIMEOUT"] == "9.5"
     # Regression for the CRITICAL os.environ-staleness bug: the long-running process must
     # observe the new value immediately, not the value loaded once at startup.
     assert os.environ["PROBE_TIMEOUT"] == "9.5"
@@ -155,9 +162,9 @@ def test_save_writes_file_and_syncs_environ(temp_server, monkeypatch):
 
 def test_save_serialises_bool_fields(temp_server):
     server._save({"guard_url_enabled": False, "guard_destructive_enabled": True})
-    text = temp_server["cfg"].read_text(encoding="utf-8")
-    assert "GUARD_URL_ENABLED=false" in text
-    assert "GUARD_DESTRUCTIVE_ENABLED=true" in text
+    flat = ConfigFile(temp_server["cfg"]).read()
+    assert flat["GUARD_URL_ENABLED"] == "false"
+    assert flat["GUARD_DESTRUCTIVE_ENABLED"] == "true"
 
 
 def test_allowed_add_is_idempotent_and_remove(temp_server):

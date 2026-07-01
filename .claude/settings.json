@@ -28,6 +28,12 @@
           {
             "type": "command",
             "command": "python hooks/scan_tool_output.py"
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python hooks/enforce_feedback.py"
           }
         ]
       }

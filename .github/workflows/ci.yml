@@ -20,12 +20,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       # The unit tests are offline: they import only agentmem.{guardrails,lesson,config,
-      # ports,rules_store,atomicio}, which need just pydantic. mem0 / qdrant-client /
-      # sentence-transformers (torch) are imported lazily inside build_store, so we skip
-      # that heavy tree to keep the PR gate fast. pytest adds src/ to the path itself
-      # (pythonpath in pyproject), so the package needs no install.
+      # ports,rules_store,atomicio} + the dashboard (configfile), which need pydantic and
+      # ruamel.yaml (config.py's YAML loader + configfile's round-trip writer). mem0 /
+      # qdrant-client / sentence-transformers (torch) are imported lazily inside
+      # build_store, so we skip that heavy tree to keep the PR gate fast. pytest adds src/
+      # to the path itself (pythonpath in pyproject), so the package needs no install.
       - name: Install test dependencies
-        run: pip install pytest pytest-asyncio pydantic
+        run: pip install pytest pytest-asyncio pydantic ruamel.yaml
       - name: Run tests
         run: pytest -q
 

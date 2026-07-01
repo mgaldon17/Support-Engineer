@@ -62,7 +62,7 @@ export default {
         <ul class="text-sm text-slate-400 space-y-1.5 list-disc pl-5">
           <li>Los guardrails se aplican en el hook <span class="chip">PreToolUse</span>: vetan la llamada <i>antes</i> de ejecutarse.</li>
           <li>El primer veto gana; con un guardrail desactivado, su cadena se omite por completo.</li>
-          <li>Cambios aquí se escriben en <span class="chip">config.env</span> y aplican en la siguiente llamada del agente.</li>
+          <li>Cambios aquí se escriben en <span class="chip">config.yaml</span> y aplican en la siguiente llamada del agente.</li>
         </ul>
       </section>
     </div>`;

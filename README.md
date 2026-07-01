@@ -1,8 +1,9 @@
+
 <div align="center">
 
 # 🤖 Support Engineer
 
-### A self-improving automation agent for enterprise support — built _on_ Claude Code, not just _with_ it.
+### A self-learning automation agent for enterprise support — built _on_ Claude Code, not just _with_ it.
 
 **The loop, the reasoning and the vision are native. The only real code is a memory that lets the agent _learn_.**
 
@@ -32,12 +33,12 @@ The repository contributes **two things on top of Claude Code**:
 
 | Piece | What it adds |
 |-------|--------------|
-| 🧠 **`agentmem`** — a lesson memory over Qdrant, exposed as the `memory` MCP server | The agent **remembers procedures** that worked and **reuses them by meaning**, so it gets better every time. |
+| 🧠 **`agentmem`** — a lesson memory over Qdrant, exposed as the `memory` MCP server | The agent **remembers procedures** that worked and **reuses them by meaning**, so it learns from each solved task instead of starting from scratch. |
 | 🪝 **Two hooks** — auto-inject lessons + apply guardrails | Relevant memory is **fed in automatically**, and dangerous actions are **vetoed in code** before they run. |
 
 > Everything else — the operating flow — is **instructions**, not code. They live in
 > [`CLAUDE.md`](./CLAUDE.md) and steer the model directly. The "scalator" idea: the agent
-> _scales its own competence_ by turning each solved task into reusable memory.
+> _learns on its own_, turning each solved task into reusable memory.
 
 ### The big picture
 
@@ -181,21 +182,22 @@ Both guards **fail open**: a bug or missing dependency never wedges the agent.
 ```
 support-engineer/
 ├── CLAUDE.md                 # the operating flow (instructions = behaviour)
-├── config.env                # all settings (KEY=VALUE) — single source of config
+├── config.yaml               # all settings (nested YAML) — single source of config
+├── .env.example              # template for the gitignored .env (API keys + DC_MCP_HOME)
 ├── docker-compose.yml        # Qdrant on localhost:6333
-├── .mcp.json                 # wires the `memory` MCP server
+├── .mcp.json                 # wires 3 MCP servers: memory (local), pw, dc (${DC_MCP_HOME})
 ├── start_dashboard.sh        # launch the control panel + open the browser
 ├── hooks/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recall lessons
 │   └── guardrail_check.py    # PreToolUse → veto bad URLs / destructive cmds
 ├── dashboard/                # the control panel (stdlib HTTP server + web UI)
 │   ├── server.py             # thin HTTP coordinator: routing + dispatch
-│   ├── envfile.py            # config.env read/write (atomic, comment-preserving)
+│   ├── configfile.py         # config.yaml read/write (atomic, comment-preserving)
 │   ├── settings_store.py     # settings.json permissions allowlist (atomic)
 │   ├── translation.py        # glob ↔ blocklist-regex helpers (pure)
 │   └── assets/               # layered front-end (api, dom, views, app)
 └── src/agentmem/             # ← the only real code
-    ├── config.py             # config layer (config.env → env vars → defaults)
+    ├── config.py             # config layer (config.yaml → env vars → defaults)
     ├── lesson.py             # Lesson entity + origin / counters
     ├── ports.py              # LessonStore Protocol (the store abstraction)
     ├── store.py              # Mem0LessonStore over Qdrant (semantic)
@@ -209,29 +211,101 @@ support-engineer/
 
 ```bash
 docker compose up -d        # 1. start Qdrant (the lesson store) on :6333
-pip install -e .            # 2. install agentmem (mem0 + qdrant-client + mcp + httpx)
+pip install -e .            # 2. install agentmem (mem0 + qdrant-client + mcp + httpx + ruamel.yaml)
 # 3. open the repo in Claude Code — the `memory` MCP server + hooks load automatically
 ```
 
 The embedder runs **locally, in-process** (sentence-transformers, multilingual MiniLM) —
 no API key, fully offline after the one-time model download.
 
+### MCP servers
+
+Claude Code wires the agent's tools from [`.mcp.json`](./.mcp.json) — **three** servers:
+
+| Server | Tools | Origin |
+|--------|-------|--------|
+| `memory` | `lesson_*` | **This repo** — `python -m agentmem.mcp_server`. |
+| `pw` | Playwright browser | npm on demand — `npx @playwright/mcp@latest`. |
+| `dc` | Desktop Commander (shell / files) | A **local sibling checkout** at `${DC_MCP_HOME}`. |
+
+`dc` is **not** vendored here — it runs from a separate Desktop Commander checkout on your
+machine. For security and portability its path is **not hardcoded** in the committed
+`.mcp.json`; instead it expands the `${DC_MCP_HOME}` environment variable:
+
+```json
+"dc": {
+  "command": "node",
+  "args": ["${DC_MCP_HOME}/dist/index.js"],
+  "cwd": "${DC_MCP_HOME}"
+}
+```
+
+Set `DC_MCP_HOME` to your clone (an **absolute** path — `.mcp.json` does not tilde-expand).
+Keep the value in the gitignored `.env` (see `.env.example`), but note Claude Code expands
+`.mcp.json` from the **process environment**, so export it before launching:
+
+```bash
+set -a; source .env; set +a     # load DC_MCP_HOME (and the API keys) into the env
+claude                          # then launch Claude Code
+```
+
+If `DC_MCP_HOME` is unset the `dc` server simply fails to start; `memory` and `pw` are
+unaffected. (You don't have Desktop Commander? Drop the `dc` block from `.mcp.json`.)
+
 ### Configuration
 
-All settings live in [`config.env`](./config.env) (`KEY=VALUE`). Resolution order:
+All settings live in [`config.yaml`](./config.yaml) (nested by section). Resolution order:
 
-> **real environment variable** ⟶ **`config.env`** ⟶ **built-in defaults**
+> **real environment variable** ⟶ **`config.yaml`** ⟶ **built-in defaults**
 
-Point at another file with `AGENTMEM_CONFIG=/path/to/file`. To swap the local embedder
-for a remote OpenAI-compatible one, set `EMBEDDER_PROVIDER=openai` +
-`EMBEDDER_MODEL / BASE_URL / API_KEY / DIMS` (changing dimensions needs a fresh Qdrant
-collection).
+Each `section.key` maps to a flat env name via `config._FIELD_MAP` (e.g.
+`embedder.provider` ⟶ `EMBEDDER_PROVIDER`), so any setting can be overridden per-deploy
+with that env var. Point at another file with `AGENTMEM_CONFIG=/path/to/file`.
+
+**Secrets live in `.env`, not in `config.yaml`.** API keys sit in a gitignored
+[`.env`](./.env.example) (KEY=VALUE) and the YAML references them as `${EMBEDDER_API_KEY}`
+/ `${LLM_API_KEY}`; the loader reads `.env` first and expands those placeholders. Copy
+`.env.example` ⟶ `.env` and fill in real keys (override the file with
+`AGENTMEM_DOTENV=/path/to/.env`).
+
+#### Full `config.yaml` reference
+
+| `section.key` | Env name | Default | Meaning |
+|---------------|----------|---------|---------|
+| `memory.qdrant_host` | `QDRANT_HOST` | `localhost` | Qdrant host. |
+| `memory.qdrant_port` | `QDRANT_PORT` | `6333` | Qdrant port. |
+| `memory.collection` | `MEM_COLLECTION` | `agentcore_lessons` | Qdrant collection holding the lessons. |
+| `memory.mem_user` | `MEM_USER` | `agentcore` | mem0 identity namespace shared by all lessons. |
+| `embedder.provider` | `EMBEDDER_PROVIDER` | `huggingface` | Embedder backend: `huggingface`/`fastembed` (local), or `openai`/`lmstudio`/`ollama` (remote). |
+| `embedder.model` | `EMBEDDER_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Embedding model name. |
+| `embedder.base_url` | `EMBEDDER_BASE_URL` | `""` | Endpoint for remote embedder providers only. |
+| `embedder.api_key` | `EMBEDDER_API_KEY` | `${EMBEDDER_API_KEY}` → `.env` | Key for OpenAI-compatible embedders; empty for local. |
+| `embedder.dims` | `EMBEDDER_DIMS` | `384` | Vector dimension — **must** match the model (changing it needs a fresh collection). |
+| `embedder.check_reachable` | `EMBEDDER_CHECK_REACHABLE` | `true` | Preflight a remote embedder (ollama/openai/lmstudio) before building the store — for ollama, also that the model is pulled — so a down embedder fails loudly instead of writing empty vectors. No-op for local providers. |
+| `llm.infer` | `INFER` | `false` | `true` ⟶ mem0's LLM rewrites/reconciles a lesson on write; `false` ⟶ stored verbatim, LLM never called. |
+| `llm.provider` | `LLM_PROVIDER` | `openai` | LLM provider (OpenAI-compatible). |
+| `llm.model` | `LLM_MODEL` | `qwen2.5-7b-instruct-1m` | LLM model (only used when `infer: true`). |
+| `llm.base_url` | `LLM_BASE_URL` | `http://localhost:1234/v1` | LLM endpoint (default = local LM Studio). |
+| `llm.api_key` | `LLM_API_KEY` | `${LLM_API_KEY}` → `.env` | LLM key (only used when `infer: true`). |
+| `llm.temperature` | `LLM_TEMPERATURE` | `0.1` | Sampling temperature — **only** the `infer: true` write path; never affects search. |
+| `llm.top_p` | `LLM_TOP_P` | `1.0` | Nucleus sampling — same scope as `temperature`. |
+| `llm.max_tokens` | `LLM_MAX_TOKENS` | `2000` | Max tokens for the write-time rewrite. |
+| `guardrails.url_enabled` | `GUARD_URL_ENABLED` | `true` | Master switch for the URL guard. |
+| `guardrails.destructive_enabled` | `GUARD_DESTRUCTIVE_ENABLED` | `true` | Master switch for the destructive-command guard. |
+| `guardrails.allow_domains` | `GUARD_ALLOW_DOMAINS` | `""` | Comma-separated host allowlist for browsing; empty = any host. |
+| `guardrails.check_reachable` | `GUARD_CHECK_REACHABLE` | `true` | Probe that a URL is reachable before allowing navigation. |
+| `guardrails.disabled_patterns` | `GUARD_DISABLED_PATTERNS` | `""` | Comma-separated keys of built-in destructive patterns to disable. |
+| `guardrails.custom_rules_file` | `GUARD_CUSTOM_RULES_FILE` | `""` | JSON file of user rules; empty = `<repo>/custom_guardrails.json`. |
+| `guardrails.probe_timeout` | `PROBE_TIMEOUT` | `5.0` | URL-reachability probe timeout (seconds). |
+| `guardrails.probe_user_agent` | `PROBE_USER_AGENT` | `Mozilla/5.0 (agentmem url-guardrail)` | User-Agent for the probe. |
+| `retrieval.search_limit` | `LESSON_SEARCH_LIMIT` | `8` | Default `top_k` for semantic recall. |
+| `retrieval.list_limit` | `LESSON_LIST_LIMIT` | `1000` | `top_k` cap when enumerating all lessons. |
 
 ### Control panel
 
 A visual control panel for a level-3 engineer to inspect and change everything the agent
-exposes — no terminal needed. It is a dependency-free **stdlib HTTP server** + a layered
-web UI (Tailwind); the embedder/Qdrant aside, it runs fully offline.
+exposes — no terminal needed. It is a **stdlib HTTP server** (config IO via ruamel.yaml) +
+a layered web UI (Tailwind); the embedder/Qdrant aside, it runs fully offline.
 
 ```bash
 ./start_dashboard.sh            # starts the server and opens http://localhost:8787
@@ -249,10 +323,10 @@ python dashboard/server.py --port 8787
 | **Lessons** | Live counts (total / pending / approved) and the pending-review queue with **Validate** / **Reject**. |
 | **Memory** | Qdrant host/port/collection/namespace, embedder provider/model/dims, retrieval limits. |
 
-Edits are written back to [`config.env`](./config.env), `.claude/settings.json`
+Edits are written back to [`config.yaml`](./config.yaml), `.claude/settings.json`
 (permissions only) and `custom_guardrails.json` (user rules) — and apply on the agent's
-next tool call. New config keys: `GUARD_URL_ENABLED`, `GUARD_DESTRUCTIVE_ENABLED`,
-`GUARD_DISABLED_PATTERNS`, `GUARD_CUSTOM_RULES_FILE`.
+next tool call. The dashboard edits the YAML in place (comments preserved) under
+`guardrails.*` / `memory.*` / `embedder.*` / `retrieval.*`.
 
 ### Slash commands
 
@@ -278,12 +352,12 @@ El repositorio aporta **dos cosas encima de Claude Code**:
 
 | Pieza | Qué añade |
 |-------|-----------|
-| 🧠 **`agentmem`** — una memoria de lecciones sobre Qdrant, expuesta como el servidor MCP `memory` | El agente **recuerda procedimientos** que funcionaron y los **reutiliza por significado**, así que mejora cada vez. |
+| 🧠 **`agentmem`** — una memoria de lecciones sobre Qdrant, expuesta como el servidor MCP `memory` | El agente **recuerda procedimientos** que funcionaron y los **reutiliza por significado**, así que aprende de cada tarea en lugar de empezar de cero. |
 | 🪝 **Dos hooks** — auto-inyectar lecciones + aplicar guardarraíles | La memoria relevante se **inyecta automáticamente**, y las acciones peligrosas se **vetan en código** antes de ejecutarse. |
 
 > Todo lo demás — el flujo operativo — son **instrucciones**, no código. Viven en
 > [`CLAUDE.md`](./CLAUDE.md) y guían al modelo directamente. La idea "scalator": el agente
-> _escala su propia competencia_ convirtiendo cada tarea resuelta en memoria reutilizable.
+> _aprende solo_, convirtiendo cada tarea resuelta en memoria reutilizable.
 
 ### La visión de conjunto
 
@@ -430,21 +504,22 @@ bloquean al agente.
 ```
 support-engineer/
 ├── CLAUDE.md                 # el flujo operativo (instrucciones = comportamiento)
-├── config.env                # todos los ajustes (KEY=VALUE) — fuente única de config
+├── config.yaml               # todos los ajustes (YAML por secciones) — fuente única de config
+├── .env.example              # plantilla del .env gitignored (API keys + DC_MCP_HOME)
 ├── docker-compose.yml        # Qdrant en localhost:6333
-├── .mcp.json                 # cablea el servidor MCP `memory`
+├── .mcp.json                 # cablea 3 servidores MCP: memory (local), pw, dc (${DC_MCP_HOME})
 ├── start_dashboard.sh        # arranca el panel de control + abre el navegador
 ├── hooks/
 │   ├── inject_lessons.py     # UserPromptSubmit → auto-recuerda lecciones
 │   └── guardrail_check.py    # PreToolUse → veta URLs malas / comandos destructivos
 ├── dashboard/                # el panel de control (servidor HTTP stdlib + UI web)
 │   ├── server.py             # coordinador HTTP fino: enrutado + dispatch
-│   ├── envfile.py            # lectura/escritura de config.env (atómica, conserva comentarios)
+│   ├── configfile.py         # lectura/escritura de config.yaml (atómica, conserva comentarios)
 │   ├── settings_store.py     # allowlist de permisos en settings.json (atómica)
 │   ├── translation.py        # helpers glob ↔ regex de bloqueo (puros)
 │   └── assets/               # front-end por capas (api, dom, views, app)
 └── src/agentmem/             # ← el único código real
-    ├── config.py             # capa de config (config.env → env vars → defaults)
+    ├── config.py             # capa de config (config.yaml → env vars → defaults)
     ├── lesson.py             # entidad Lesson + origen / contadores
     ├── ports.py              # Protocol LessonStore (la abstracción del almacén)
     ├── store.py              # Mem0LessonStore sobre Qdrant (semántico)
@@ -458,30 +533,103 @@ support-engineer/
 
 ```bash
 docker compose up -d        # 1. arranca Qdrant (la memoria) en :6333
-pip install -e .            # 2. instala agentmem (mem0 + qdrant-client + mcp + httpx)
+pip install -e .            # 2. instala agentmem (mem0 + qdrant-client + mcp + httpx + ruamel.yaml)
 # 3. abre el repo en Claude Code — el servidor MCP `memory` + los hooks cargan solos
 ```
 
 El embedder corre **localmente, en el proceso** (sentence-transformers, MiniLM
 multilingüe) — sin API key, totalmente offline tras la descarga única del modelo.
 
+### Servidores MCP
+
+Claude Code cablea las tools del agente desde [`.mcp.json`](./.mcp.json) — **tres** servidores:
+
+| Servidor | Tools | Origen |
+|----------|-------|--------|
+| `memory` | `lesson_*` | **Este repo** — `python -m agentmem.mcp_server`. |
+| `pw` | Navegador Playwright | npm bajo demanda — `npx @playwright/mcp@latest`. |
+| `dc` | Desktop Commander (shell / ficheros) | Un **checkout hermano local** en `${DC_MCP_HOME}`. |
+
+`dc` **no** está incluido en este repo — corre desde un checkout aparte de Desktop
+Commander en tu máquina. Por seguridad y portabilidad su ruta **no está hardcodeada** en el
+`.mcp.json` versionado; en su lugar expande la variable de entorno `${DC_MCP_HOME}`:
+
+```json
+"dc": {
+  "command": "node",
+  "args": ["${DC_MCP_HOME}/dist/index.js"],
+  "cwd": "${DC_MCP_HOME}"
+}
+```
+
+Pon `DC_MCP_HOME` apuntando a tu clon (ruta **absoluta** — `.mcp.json` no expande `~`).
+Guarda el valor en el `.env` gitignored (ver `.env.example`), pero ten en cuenta que Claude
+Code expande `.mcp.json` desde el **entorno del proceso**, así que expórtalo antes de
+arrancar:
+
+```bash
+set -a; source .env; set +a     # carga DC_MCP_HOME (y las API keys) en el entorno
+claude                          # luego arranca Claude Code
+```
+
+Si `DC_MCP_HOME` no está definida, el servidor `dc` simplemente no arranca; `memory` y `pw`
+no se ven afectados. (¿No tienes Desktop Commander? Quita el bloque `dc` de `.mcp.json`.)
+
 ### Configuración
 
-Todos los ajustes viven en [`config.env`](./config.env) (`KEY=VALUE`). Orden de
+Todos los ajustes viven en [`config.yaml`](./config.yaml) (YAML por secciones). Orden de
 resolución:
 
-> **variable de entorno real** ⟶ **`config.env`** ⟶ **defaults del código**
+> **variable de entorno real** ⟶ **`config.yaml`** ⟶ **defaults del código**
 
-Apunta a otro fichero con `AGENTMEM_CONFIG=/ruta/al/fichero`. Para cambiar el embedder
-local por uno remoto compatible con OpenAI, define `EMBEDDER_PROVIDER=openai` +
-`EMBEDDER_MODEL / BASE_URL / API_KEY / DIMS` (cambiar la dimensión exige una colección
-Qdrant nueva).
+Cada `section.key` mapea a un nombre de env plano vía `config._FIELD_MAP` (p. ej.
+`embedder.provider` ⟶ `EMBEDDER_PROVIDER`), así cualquier ajuste se puede sobrescribir por
+despliegue con esa env var. Apunta a otro fichero con `AGENTMEM_CONFIG=/ruta/al/fichero`.
+
+**Los secretos viven en `.env`, no en `config.yaml`.** Las API keys están en un `.env`
+gitignored (KEY=VALUE) y el YAML las referencia como `${EMBEDDER_API_KEY}` /
+`${LLM_API_KEY}`; el loader lee primero el `.env` y expande esos placeholders. Copia
+`.env.example` ⟶ `.env` y pon las keys reales (cambia el fichero con
+`AGENTMEM_DOTENV=/ruta/al/.env`).
+
+#### Referencia completa de `config.yaml`
+
+| `section.key` | Nombre env | Default | Significado |
+|---------------|------------|---------|-------------|
+| `memory.qdrant_host` | `QDRANT_HOST` | `localhost` | Host de Qdrant. |
+| `memory.qdrant_port` | `QDRANT_PORT` | `6333` | Puerto de Qdrant. |
+| `memory.collection` | `MEM_COLLECTION` | `agentcore_lessons` | Colección de Qdrant con las lecciones. |
+| `memory.mem_user` | `MEM_USER` | `agentcore` | Namespace de identidad de mem0 (compartido por todas). |
+| `embedder.provider` | `EMBEDDER_PROVIDER` | `huggingface` | Backend del embedder: `huggingface`/`fastembed` (local), o `openai`/`lmstudio`/`ollama` (remoto). |
+| `embedder.model` | `EMBEDDER_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Modelo de embeddings. |
+| `embedder.base_url` | `EMBEDDER_BASE_URL` | `""` | Endpoint, solo para embedders remotos. |
+| `embedder.api_key` | `EMBEDDER_API_KEY` | `${EMBEDDER_API_KEY}` → `.env` | Key para embedders OpenAI-compatibles; vacía en local. |
+| `embedder.dims` | `EMBEDDER_DIMS` | `384` | Dimensión del vector — **debe** coincidir con el modelo (cambiarla exige colección nueva). |
+| `embedder.check_reachable` | `EMBEDDER_CHECK_REACHABLE` | `true` | Preflight de un embedder remoto (ollama/openai/lmstudio) antes de construir el store — para ollama, también que el modelo esté pulled — para que un embedder caído falle ruidosamente en vez de escribir vectores vacíos. No-op en local. |
+| `llm.infer` | `INFER` | `false` | `true` ⟶ el LLM de mem0 reescribe/reconcilia la lección al guardar; `false` ⟶ verbatim, LLM nunca llamado. |
+| `llm.provider` | `LLM_PROVIDER` | `openai` | Provider del LLM (OpenAI-compatible). |
+| `llm.model` | `LLM_MODEL` | `qwen2.5-7b-instruct-1m` | Modelo del LLM (solo con `infer: true`). |
+| `llm.base_url` | `LLM_BASE_URL` | `http://localhost:1234/v1` | Endpoint del LLM (default = LM Studio local). |
+| `llm.api_key` | `LLM_API_KEY` | `${LLM_API_KEY}` → `.env` | Key del LLM (solo con `infer: true`). |
+| `llm.temperature` | `LLM_TEMPERATURE` | `0.1` | Temperatura — **solo** la ruta de escritura `infer: true`; nunca afecta la búsqueda. |
+| `llm.top_p` | `LLM_TOP_P` | `1.0` | Nucleus sampling — mismo ámbito que `temperature`. |
+| `llm.max_tokens` | `LLM_MAX_TOKENS` | `2000` | Máx. tokens de la reescritura al guardar. |
+| `guardrails.url_enabled` | `GUARD_URL_ENABLED` | `true` | Interruptor maestro del guard de URL. |
+| `guardrails.destructive_enabled` | `GUARD_DESTRUCTIVE_ENABLED` | `true` | Interruptor maestro del guard de comandos destructivos. |
+| `guardrails.allow_domains` | `GUARD_ALLOW_DOMAINS` | `""` | Allowlist de hosts (coma-separada) para navegar; vacío = cualquiera. |
+| `guardrails.check_reachable` | `GUARD_CHECK_REACHABLE` | `true` | Comprueba que la URL es accesible antes de permitir navegar. |
+| `guardrails.disabled_patterns` | `GUARD_DISABLED_PATTERNS` | `""` | Keys (coma-separadas) de patrones destructivos built-in a desactivar. |
+| `guardrails.custom_rules_file` | `GUARD_CUSTOM_RULES_FILE` | `""` | Fichero JSON de reglas de usuario; vacío = `<repo>/custom_guardrails.json`. |
+| `guardrails.probe_timeout` | `PROBE_TIMEOUT` | `5.0` | Timeout (s) del probe de accesibilidad de URL. |
+| `guardrails.probe_user_agent` | `PROBE_USER_AGENT` | `Mozilla/5.0 (agentmem url-guardrail)` | User-Agent del probe. |
+| `retrieval.search_limit` | `LESSON_SEARCH_LIMIT` | `8` | `top_k` por defecto en la recuperación semántica. |
+| `retrieval.list_limit` | `LESSON_LIST_LIMIT` | `1000` | Tope de `top_k` al enumerar todas las lecciones. |
 
 ### Panel de control
 
 Un panel visual para que un ingeniero de nivel 3 inspeccione y cambie todo lo que el
-agente expone — sin tocar la terminal. Es un **servidor HTTP de la stdlib** (sin
-dependencias) + una UI web por capas (Tailwind); salvo el embedder/Qdrant, funciona 100%
+agente expone — sin tocar la terminal. Es un **servidor HTTP de la stdlib** (IO de config
+vía ruamel.yaml) + una UI web por capas (Tailwind); salvo el embedder/Qdrant, funciona 100%
 offline.
 
 ```bash
@@ -500,10 +648,10 @@ python dashboard/server.py --port 8787
 | **Lecciones** | Conteos en vivo (total / por revisar / aprobadas) y la cola pendiente con **Validar** / **Rechazar**. |
 | **Memoria** | Host/puerto/colección/namespace de Qdrant, provider/modelo/dims del embedder, límites de recuperación. |
 
-Los cambios se escriben en [`config.env`](./config.env), `.claude/settings.json` (solo
+Los cambios se escriben en [`config.yaml`](./config.yaml), `.claude/settings.json` (solo
 permisos) y `custom_guardrails.json` (reglas de usuario) — y aplican en la siguiente
-llamada del agente. Nuevas claves de config: `GUARD_URL_ENABLED`,
-`GUARD_DESTRUCTIVE_ENABLED`, `GUARD_DISABLED_PATTERNS`, `GUARD_CUSTOM_RULES_FILE`.
+llamada del agente. El panel edita el YAML in situ (conservando comentarios) bajo
+`guardrails.*` / `memory.*` / `embedder.*` / `retrieval.*`.
 
 ### Comandos slash
 
@@ -519,3 +667,5 @@ llamada del agente. Nuevas claves de config: `GUARD_URL_ENABLED`,
 **Built on 🤖 [Claude Code](https://claude.com/claude-code) · Powered by 🧠 [mem0](https://mem0.ai/) + [Qdrant](https://qdrant.tech/)**
 
 </div>
+=======
+
