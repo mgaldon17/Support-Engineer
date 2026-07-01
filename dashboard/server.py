@@ -320,9 +320,22 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
 
     def _serve_file(self, rel: str) -> None:
-        target = (_HERE / rel.lstrip("/")).resolve()
+        clean = rel.lstrip("/")
+        # Allow only known static roots for this server surface.
+        if clean != "index.html" and not clean.startswith("assets/"):
+            return self._json({"error": "forbidden"}, 403)
+        # Reject ambiguous/suspicious path syntax before filesystem access.
+        if "\\" in clean:
+            return self._json({"error": "forbidden"}, 403)
+        parts = [p for p in clean.split("/") if p]
+        if any(p in (".", "..") for p in parts):
+            return self._json({"error": "forbidden"}, 403)
+
+        target = (_HERE / clean).resolve()
         if not target.is_relative_to(_HERE):   # symlink-safe containment check
             return self._json({"error": "forbidden"}, 403)
+        if not target.is_file():
+            return self._json({"error": "not found"}, 404)
         try:
             ctype = _CONTENT_TYPES.get(target.suffix, "application/octet-stream")
             self._send(200, target.read_bytes(), ctype)
