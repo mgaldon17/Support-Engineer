@@ -24,5 +24,6 @@ def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -
         try:
             os.unlink(tmp)
         except OSError:
+            # Best-effort cleanup: ignore unlink failures and re-raise the original error.
             pass
         raise
