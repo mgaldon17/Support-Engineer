@@ -320,7 +320,11 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(obj).encode("utf-8"), "application/json; charset=utf-8")
 
     def _serve_file(self, rel: str) -> None:
-        target = (_HERE / rel.lstrip("/")).resolve()
+        clean_rel = rel.split("?", 1)[0].split("#", 1)[0]
+        norm_rel = os.path.normpath("/" + clean_rel.lstrip("/"))
+        if norm_rel.startswith("/..") or norm_rel == "/":
+            return self._json({"error": "forbidden"}, 403)
+        target = (_HERE / norm_rel.lstrip("/")).resolve()
         if not target.is_relative_to(_HERE):   # symlink-safe containment check
             return self._json({"error": "forbidden"}, 403)
         try:
