@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/inject_lessons.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/inject_lessons.py\""
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/guardrail_check.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/guardrail_check.py\""
           }
         ]
       }
@@ -27,13 +27,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/scan_tool_output.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/scan_tool_output.py\""
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python hooks/enforce_feedback.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/hooks/enforce_feedback.py\""
           }
         ]
       }
