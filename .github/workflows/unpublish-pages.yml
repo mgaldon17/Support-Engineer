@@ -1,0 +1,76 @@
+name: Unpublish landing (take site offline)
+
+# Manual only — replaces the live site with the "Page unpublished" screen so the
+# Pages URL stops serving the landing.
+#
+# NOTE: this is a SOFT take-down. To fully disable GitHub Pages, go to
+#   Settings -> Pages -> set Source to "None".
+# The API to disable Pages from Actions is not stable, so we don't automate it.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "OFFLINE" to confirm taking the site down'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "OFFLINE" ]; then
+            echo "::error::Confirmation failed. Re-run and type OFFLINE to proceed."
+            exit 1
+          fi
+
+  build-offline:
+    needs: guard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+      # Publish the "Page unpublished" screen as the site root.
+      - name: Promote unpublish page to index
+        run: cp dist/unpublish.html dist/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload offline artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build-offline
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy offline page
+        id: deployment
+        uses: actions/deploy-pages@v4
